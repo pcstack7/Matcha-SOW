@@ -1,18 +1,37 @@
 {
+  "name": "matcha-sow",
+  "version": "1.0.0",
+  "description": "Statement of Work Generator with AI",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server.js",
+    "start": "npm run build && npm run server"
+  },
   "dependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "better-sqlite3": "^12.4.1",
+    "docx": "^9.5.1",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "node-fetch": "^3.3.2"
+    "mammoth": "^1.11.0",
+    "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.17.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "vite": "^7.1.12"
   },
-  "name": "matcha-auth",
-  "version": "1.0.0",
-  "description": "",
-  "main": "matchaAuth.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
-  },
-  "keywords": [],
+  "keywords": [
+    "sow",
+    "statement-of-work",
+    "ai",
+    "generator"
+  ],
   "author": "",
   "license": "ISC"
 }
