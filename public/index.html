@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matcha Chat + File Upload</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+      }
+      #response {
+        white-space: pre-wrap;
+        background: #f7f7f7;
+        padding: 10px;
+        border-radius: 8px;
+        margin-top: 15px;
+      }
+      label {
+        display: block;
+        margin-top: 10px;
+      }
+      button {
+        margin-top: 10px;
+        padding: 8px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Matcha Chat with File Upload</h2>
+
+    <form id="chatForm">
+      <label for="input">Your message:</label>
+      <textarea id="input" rows="4" cols="60" required></textarea>
+
+      <label for="file">Attach a file (optional):</label>
+      <input type="file" id="file" accept=".txt,.csv,.docx,.pdf" />
+
+      <button type="submit">Send to Matcha</button>
+    </form>
+
+    <div id="response"></div>
+
+    <script>
+      const form = document.getElementById("chatForm");
+      const responseBox = document.getElementById("response");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const textInput = document.getElementById("input").value.trim();
+        const fileInput = document.getElementById("file").files[0];
+
+        if (!textInput && !fileInput) {
+          alert("Please provide a message or upload a file.");
+          return;
+        }
+
+        responseBox.textContent = "Processing...";
+
+        let fileText = "";
+        if (fileInput) {
+          fileText = await readFileContent(fileInput);
+        }
+
+        // Combine both text and file content
+        const fullInput = fileText
+          ? `${textInput}\n\nAttached File Content:\n${fileText}`
+          : textInput;
+
+        try {
+        //  const res = await fetch("https://o00tau25nh.execute-api.us-east-1.amazonaws.com/default/myMatchAuth/chat", {
+        //    method: "POST",
+        //    headers: { "Content-Type": "application/json" },
+        //    body: JSON.stringify({ input: fullInput }),
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: fullInput }),
+     
+          });
+          
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          
+          const data = await res.json();
+          responseBox.textContent = data.outputText || "No response received.";
+        } catch (error) {
+          console.error('Error:', error);
+          responseBox.textContent = "Error: Could not connect to the server. Please try again later.";
+        }
+        });
+      function readFileContent(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = (err) => reject(err);
+          reader.readAsText(file);
+        });
+      }
+    </script>
+  </body>
+</html>
