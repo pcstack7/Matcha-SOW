@@ -5,3 +5,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vscode/
+
+# Database
+sow.db
+
+# Uploads
+uploads/
+
+# Build output
+public/assets/
+public/index.html
+public/vite.svg
