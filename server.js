@@ -85,11 +85,11 @@ app.get("/api/accounts/:id", (req, res) => {
 // Create new account
 app.post("/api/accounts", (req, res) => {
   try {
-    const { name, company, email, phone, address } = req.body;
+    const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    const id = accountOps.create({ name, company, email, phone, address });
+    const id = accountOps.create({ name, account_contact, email, phone, notes });
     const account = accountOps.getById(id);
     res.status(201).json(account);
   } catch (err) {
@@ -101,11 +101,11 @@ app.post("/api/accounts", (req, res) => {
 // Update account
 app.put("/api/accounts/:id", (req, res) => {
   try {
-    const { name, company, email, phone, address } = req.body;
+    const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    accountOps.update(req.params.id, { name, company, email, phone, address });
+    accountOps.update(req.params.id, { name, account_contact, email, phone, notes });
     const account = accountOps.getById(req.params.id);
     res.json(account);
   } catch (err) {
@@ -260,10 +260,10 @@ app.post("/api/sows/generate", async (req, res) => {
     // Build the AI prompt
     const prompt = `Generate a professional Statement of Work (SOW) document with the following details:
 
-Account: ${account.name}${account.company ? ` (${account.company})` : ""}
+Account: ${account.name}${account.account_contact ? ` (Contact: ${account.account_contact})` : ""}
 Email: ${account.email || "N/A"}
 Phone: ${account.phone || "N/A"}
-Address: ${account.address || "N/A"}
+Notes: ${account.notes || "N/A"}
 
 Project Notes:
 ${project_notes}
@@ -279,7 +279,7 @@ Please generate a complete, professional SOW document with appropriate sections 
 - Terms and Conditions
 - Acceptance Criteria
 
-Format the output as a well-structured document.`;
+Format the output as a well-structured document with clear section headers and subheaders.`;
 
     // Call Matcha API
     const response = await fetch(`${BASE_URL}/completions`, {
@@ -351,20 +351,46 @@ app.get("/api/export/:id/pdf", (req, res) => {
 
     doc.pipe(res);
 
-    // Header
-    doc.fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
+    // Main Header - Verdana 24 (using Helvetica-Bold as closest match)
+    doc.font('Helvetica-Bold').fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
     doc.moveDown();
 
-    // Account Info
-    doc.fontSize(14).fillColor("#393392").text("Client Information", { underline: true });
-    doc.fontSize(11).fillColor("#000000");
+    // Client Info Header - Verdana 16
+    doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text("Client Information", { underline: true });
+    doc.moveDown(0.5);
+
+    // Client details - Verdana 9.5
+    doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
     doc.text(`Account: ${sow.account_name}`);
-    if (sow.account_company) doc.text(`Company: ${sow.account_company}`);
+    if (sow.account_contact) doc.text(`Contact: ${sow.account_contact}`);
     doc.text(`Date: ${new Date(sow.created_at).toLocaleDateString()}`);
     doc.moveDown();
 
-    // Content
-    doc.fontSize(11).fillColor("#000000").text(sow.content, { align: "left" });
+    // Parse and format content with proper styling
+    const lines = sow.content.split('\n');
+    for (const line of lines) {
+      if (line.trim() === '') {
+        doc.moveDown(0.5);
+        continue;
+      }
+
+      // Check if line is a main header (## or starts with capital letter section)
+      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+        doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text(headerText);
+        doc.moveDown(0.5);
+      }
+      // Check if line is a subheader (### or bold section)
+      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+        doc.font('Helvetica-Bold').fontSize(14).fillColor("#393392").text(subHeaderText);
+        doc.moveDown(0.3);
+      }
+      // Regular content
+      else {
+        doc.font('Helvetica').fontSize(9.5).fillColor("#000000").text(line, { align: 'left' });
+      }
+    }
 
     doc.end();
   } catch (err) {
@@ -383,48 +409,123 @@ app.get("/api/export/:id/docx", async (req, res) => {
 
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.docx`;
 
+    // Parse content and create formatted paragraphs
+    const contentParagraphs = [];
+    const lines = sow.content.split('\n');
+
+    for (const line of lines) {
+      if (line.trim() === '') {
+        contentParagraphs.push(new Paragraph({ text: "" }));
+        continue;
+      }
+
+      // Check if line is a main header
+      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+        contentParagraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: headerText,
+                bold: true,
+                font: "Verdana",
+                size: 32, // 16pt = 32 half-points
+                color: "707CF1",
+              }),
+            ],
+            spacing: { before: 200, after: 100 },
+          })
+        );
+      }
+      // Check if line is a subheader
+      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+        contentParagraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: subHeaderText,
+                bold: true,
+                font: "Verdana",
+                size: 28, // 14pt = 28 half-points
+                color: "393392",
+              }),
+            ],
+            spacing: { before: 150, after: 75 },
+          })
+        );
+      }
+      // Regular content
+      else {
+        contentParagraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: line,
+                font: "Verdana",
+                size: 19, // 9.5pt = 19 half-points
+              }),
+            ],
+          })
+        );
+      }
+    }
+
     const doc = new Document({
       sections: [
         {
           properties: {},
           children: [
             new Paragraph({
-              text: "Statement of Work",
-              heading: HeadingLevel.HEADING_1,
-              spacing: { after: 200 },
+              children: [
+                new TextRun({
+                  text: "Statement of Work",
+                  bold: true,
+                  font: "Verdana",
+                  size: 48, // 24pt
+                  color: "151744",
+                }),
+              ],
+              alignment: "center",
+              spacing: { after: 400 },
             }),
             new Paragraph({
-              text: "Client Information",
-              heading: HeadingLevel.HEADING_2,
+              children: [
+                new TextRun({
+                  text: "Client Information",
+                  bold: true,
+                  font: "Verdana",
+                  size: 32, // 16pt
+                  color: "707CF1",
+                  underline: {},
+                }),
+              ],
               spacing: { before: 200, after: 100 },
             }),
             new Paragraph({
               children: [
-                new TextRun({ text: "Account: ", bold: true }),
-                new TextRun(sow.account_name),
+                new TextRun({ text: "Account: ", bold: true, font: "Verdana", size: 19 }),
+                new TextRun({ text: sow.account_name, font: "Verdana", size: 19 }),
               ],
             }),
-            ...(sow.account_company
+            ...(sow.account_contact
               ? [
                   new Paragraph({
                     children: [
-                      new TextRun({ text: "Company: ", bold: true }),
-                      new TextRun(sow.account_company),
+                      new TextRun({ text: "Contact: ", bold: true, font: "Verdana", size: 19 }),
+                      new TextRun({ text: sow.account_contact, font: "Verdana", size: 19 }),
                     ],
                   }),
                 ]
               : []),
             new Paragraph({
               children: [
-                new TextRun({ text: "Date: ", bold: true }),
-                new TextRun(new Date(sow.created_at).toLocaleDateString()),
+                new TextRun({ text: "Date: ", bold: true, font: "Verdana", size: 19 }),
+                new TextRun({ text: new Date(sow.created_at).toLocaleDateString(), font: "Verdana", size: 19 }),
               ],
-              spacing: { after: 200 },
+              spacing: { after: 300 },
             }),
-            new Paragraph({
-              text: sow.content,
-              spacing: { before: 200 },
-            }),
+            ...contentParagraphs,
           ],
         },
       ],

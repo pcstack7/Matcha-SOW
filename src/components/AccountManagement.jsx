@@ -9,10 +9,10 @@ function AccountManagement() {
   const [editingAccount, setEditingAccount] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    company: '',
+    account_contact: '',
     email: '',
     phone: '',
-    address: '',
+    notes: '',
   });
 
   useEffect(() => {
@@ -40,10 +40,10 @@ function AccountManagement() {
       setEditingAccount(null);
       setFormData({
         name: '',
-        company: '',
+        account_contact: '',
         email: '',
         phone: '',
-        address: '',
+        notes: '',
       });
     }
     setShowModal(true);
@@ -54,10 +54,10 @@ function AccountManagement() {
     setEditingAccount(null);
     setFormData({
       name: '',
-      company: '',
+      account_contact: '',
       email: '',
       phone: '',
-      address: '',
+      notes: '',
     });
   };
 
@@ -124,7 +124,7 @@ function AccountManagement() {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Company</th>
+                  <th>Account Contact</th>
                   <th>Email</th>
                   <th>Phone</th>
                   <th>Actions</th>
@@ -134,7 +134,7 @@ function AccountManagement() {
                 {accounts.map((account) => (
                   <tr key={account.id}>
                     <td>{account.name}</td>
-                    <td>{account.company || '-'}</td>
+                    <td>{account.account_contact || '-'}</td>
                     <td>{account.email || '-'}</td>
                     <td>{account.phone || '-'}</td>
                     <td>
@@ -184,12 +184,12 @@ function AccountManagement() {
               </div>
 
               <div className="form-group">
-                <label>Company</label>
+                <label>Account Contact</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={formData.company}
-                  onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                  value={formData.account_contact}
+                  onChange={(e) => setFormData({ ...formData, account_contact: e.target.value })}
                 />
               </div>
 
@@ -214,11 +214,11 @@ function AccountManagement() {
               </div>
 
               <div className="form-group">
-                <label>Address</label>
+                <label>Notes</label>
                 <textarea
                   className="form-control"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   rows="3"
                 />
               </div>

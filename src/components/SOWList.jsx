@@ -1,6 +1,73 @@
 import { useState, useEffect } from 'react';
 import { sowApi, exportApi } from '../services/api';
 
+// Helper function to format SOW content with proper styling
+function formatSOWContent(content) {
+  if (!content) return null;
+
+  const lines = content.split('\n');
+  return lines.map((line, index) => {
+    if (line.trim() === '') {
+      return <br key={index} />;
+    }
+
+    // Main headers (## or all caps)
+    if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+      const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      return (
+        <div
+          key={index}
+          style={{
+            fontFamily: 'Verdana, sans-serif',
+            fontSize: '16px',
+            color: '#707CF1',
+            fontWeight: 'bold',
+            marginTop: '16px',
+            marginBottom: '8px',
+          }}
+        >
+          {headerText}
+        </div>
+      );
+    }
+
+    // Subheaders (### or **text**)
+    if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+      const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      return (
+        <div
+          key={index}
+          style={{
+            fontFamily: 'Verdana, sans-serif',
+            fontSize: '14px',
+            color: '#393392',
+            fontWeight: 'bold',
+            marginTop: '12px',
+            marginBottom: '6px',
+          }}
+        >
+          {subHeaderText}
+        </div>
+      );
+    }
+
+    // Regular content
+    return (
+      <div
+        key={index}
+        style={{
+          fontFamily: 'Verdana, sans-serif',
+          fontSize: '9.5px',
+          color: '#000000',
+          lineHeight: '1.6',
+        }}
+      >
+        {line}
+      </div>
+    );
+  });
+}
+
 function SOWList() {
   const [sows, setSows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,7 +187,7 @@ function SOWList() {
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Company</th>
+                  <th>Contact</th>
                   <th>Template</th>
                   <th>Created</th>
                   <th>Actions</th>
@@ -130,7 +197,7 @@ function SOWList() {
                 {filteredSOWs.map((sow) => (
                   <tr key={sow.id}>
                     <td>{sow.account_name}</td>
-                    <td>{sow.account_company || '-'}</td>
+                    <td>{sow.account_contact || '-'}</td>
                     <td>{sow.template_name || 'No template'}</td>
                     <td>{formatDate(sow.created_at)}</td>
                     <td>
@@ -180,7 +247,7 @@ function SOWList() {
 
             <div style={{ marginBottom: '1rem' }}>
               <strong>Account:</strong> {selectedSOW.account_name}
-              {selectedSOW.account_company && <> ({selectedSOW.account_company})</>}
+              {selectedSOW.account_contact && <> (Contact: {selectedSOW.account_contact})</>}
               <br />
               {selectedSOW.template_name && (
                 <>
@@ -191,7 +258,7 @@ function SOWList() {
               <strong>Created:</strong> {formatDate(selectedSOW.created_at)}
             </div>
 
-            <div className="sow-preview">{selectedSOW.content}</div>
+            <div className="sow-preview">{formatSOWContent(selectedSOW.content)}</div>
 
             <div className="modal-footer">
               <button
