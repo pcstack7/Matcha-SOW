@@ -10,6 +10,31 @@ const db = new Database(join(__dirname, 'sow.db'));
 // Enable foreign keys
 db.pragma('foreign_keys = ON');
 
+// Database migration function
+function migrateDatabase() {
+  // Check if old columns exist and migrate
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(accounts)").all();
+    const hasCompany = tableInfo.some(col => col.name === 'company');
+    const hasAddress = tableInfo.some(col => col.name === 'address');
+    const hasAccountContact = tableInfo.some(col => col.name === 'account_contact');
+    const hasNotes = tableInfo.some(col => col.name === 'notes');
+
+    if (hasCompany && !hasAccountContact) {
+      console.log('Migrating: Renaming company to account_contact...');
+      db.exec(`ALTER TABLE accounts RENAME COLUMN company TO account_contact`);
+    }
+
+    if (hasAddress && !hasNotes) {
+      console.log('Migrating: Renaming address to notes...');
+      db.exec(`ALTER TABLE accounts RENAME COLUMN address TO notes`);
+    }
+  } catch (err) {
+    // Table doesn't exist yet, will be created
+    console.log('No migration needed - creating fresh database');
+  }
+}
+
 // Initialize database schema
 function initializeDatabase() {
   // Accounts table
@@ -17,10 +42,10 @@ function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      company TEXT,
+      account_contact TEXT,
       email TEXT,
       phone TEXT,
-      address TEXT,
+      notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -57,6 +82,7 @@ function initializeDatabase() {
 
 // Initialize the database
 initializeDatabase();
+migrateDatabase();
 
 // Account operations
 export const accountOps = {
@@ -72,15 +98,15 @@ export const accountOps = {
 
   create: (account) => {
     const stmt = db.prepare(`
-      INSERT INTO accounts (name, company, email, phone, address)
+      INSERT INTO accounts (name, account_contact, email, phone, notes)
       VALUES (?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       account.name,
-      account.company || null,
+      account.account_contact || null,
       account.email || null,
       account.phone || null,
-      account.address || null
+      account.notes || null
     );
     return result.lastInsertRowid;
   },
@@ -88,15 +114,15 @@ export const accountOps = {
   update: (id, account) => {
     const stmt = db.prepare(`
       UPDATE accounts
-      SET name = ?, company = ?, email = ?, phone = ?, address = ?
+      SET name = ?, account_contact = ?, email = ?, phone = ?, notes = ?
       WHERE id = ?
     `);
     stmt.run(
       account.name,
-      account.company || null,
+      account.account_contact || null,
       account.email || null,
       account.phone || null,
-      account.address || null,
+      account.notes || null,
       id
     );
   },
@@ -143,7 +169,7 @@ export const templateOps = {
 export const sowOps = {
   getAll: () => {
     const stmt = db.prepare(`
-      SELECT s.*, a.name as account_name, a.company as account_company,
+      SELECT s.*, a.name as account_name, a.account_contact as account_contact,
              t.name as template_name
       FROM sows s
       JOIN accounts a ON s.account_id = a.id
@@ -155,7 +181,7 @@ export const sowOps = {
 
   getById: (id) => {
     const stmt = db.prepare(`
-      SELECT s.*, a.name as account_name, a.company as account_company,
+      SELECT s.*, a.name as account_name, a.account_contact as account_contact,
              t.name as template_name
       FROM sows s
       JOIN accounts a ON s.account_id = a.id

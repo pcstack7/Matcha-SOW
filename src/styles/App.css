@@ -389,9 +389,6 @@ select.form-control {
   border-radius: 8px;
   max-height: 500px;
   overflow-y: auto;
-  white-space: pre-wrap;
-  font-family: 'Georgia', serif;
-  line-height: 1.6;
 }
 
 /* Action Buttons Group */

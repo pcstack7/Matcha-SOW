@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
 import PDFDocument from "pdfkit";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
 import { accountOps, templateOps, sowOps } from "./database.js";
 
 dotenv.config();
@@ -85,11 +85,11 @@ app.get("/api/accounts/:id", (req, res) => {
 // Create new account
 app.post("/api/accounts", (req, res) => {
   try {
-    const { name, company, email, phone, address } = req.body;
+    const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    const id = accountOps.create({ name, company, email, phone, address });
+    const id = accountOps.create({ name, account_contact, email, phone, notes });
     const account = accountOps.getById(id);
     res.status(201).json(account);
   } catch (err) {
@@ -101,11 +101,11 @@ app.post("/api/accounts", (req, res) => {
 // Update account
 app.put("/api/accounts/:id", (req, res) => {
   try {
-    const { name, company, email, phone, address } = req.body;
+    const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    accountOps.update(req.params.id, { name, company, email, phone, address });
+    accountOps.update(req.params.id, { name, account_contact, email, phone, notes });
     const account = accountOps.getById(req.params.id);
     res.json(account);
   } catch (err) {
@@ -260,10 +260,10 @@ app.post("/api/sows/generate", async (req, res) => {
     // Build the AI prompt
     const prompt = `Generate a professional Statement of Work (SOW) document with the following details:
 
-Account: ${account.name}${account.company ? ` (${account.company})` : ""}
+Account: ${account.name}${account.account_contact ? ` (Contact: ${account.account_contact})` : ""}
 Email: ${account.email || "N/A"}
 Phone: ${account.phone || "N/A"}
-Address: ${account.address || "N/A"}
+Notes: ${account.notes || "N/A"}
 
 Project Notes:
 ${project_notes}
@@ -279,7 +279,7 @@ Please generate a complete, professional SOW document with appropriate sections 
 - Terms and Conditions
 - Acceptance Criteria
 
-Format the output as a well-structured document.`;
+Format the output as a well-structured document with clear section headers and subheaders.`;
 
     // Call Matcha API
     const response = await fetch(`${BASE_URL}/completions`, {
@@ -335,6 +335,81 @@ app.delete("/api/sows/:id", (req, res) => {
 // EXPORT ENDPOINTS
 // ============================================
 
+// Helper function to parse markdown tables
+function parseTable(lines, startIndex) {
+  const tableLines = [];
+  let i = startIndex;
+
+  while (i < lines.length && lines[i].trim().startsWith('|')) {
+    tableLines.push(lines[i]);
+    i++;
+  }
+
+  if (tableLines.length < 2) return null;
+
+  const headerCells = tableLines[0]
+    .split('|')
+    .map(cell => cell.trim())
+    .filter(cell => cell !== '');
+
+  const dataRows = [];
+  for (let j = 2; j < tableLines.length; j++) {
+    const cells = tableLines[j]
+      .split('|')
+      .map(cell => cell.trim())
+      .filter(cell => cell !== '');
+    if (cells.length > 0) {
+      dataRows.push(cells);
+    }
+  }
+
+  return {
+    headers: headerCells,
+    rows: dataRows,
+    endIndex: i
+  };
+}
+
+// Helper function to render table in PDF
+function renderPDFTable(doc, table) {
+  const startX = doc.page.margins.left;
+  const startY = doc.y;
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const columnWidth = pageWidth / table.headers.length;
+  const rowHeight = 20;
+
+  // Draw headers
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#FFFFFF");
+  table.headers.forEach((header, i) => {
+    const x = startX + (i * columnWidth);
+    doc.rect(x, startY, columnWidth, rowHeight).fillAndStroke("#707CF1", "#ddd");
+    doc.fillColor("#FFFFFF").text(header, x + 5, startY + 5, {
+      width: columnWidth - 10,
+      height: rowHeight - 10,
+      align: 'left'
+    });
+  });
+
+  // Draw rows
+  doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
+  let currentY = startY + rowHeight;
+
+  table.rows.forEach((row, rowIdx) => {
+    row.forEach((cell, cellIdx) => {
+      const x = startX + (cellIdx * columnWidth);
+      doc.rect(x, currentY, columnWidth, rowHeight).stroke("#ddd");
+      doc.fillColor("#000000").text(cell, x + 5, currentY + 5, {
+        width: columnWidth - 10,
+        height: rowHeight - 10,
+        align: 'left'
+      });
+    });
+    currentY += rowHeight;
+  });
+
+  doc.y = currentY + 10;
+}
+
 // Export SOW to PDF
 app.get("/api/export/:id/pdf", (req, res) => {
   try {
@@ -351,20 +426,63 @@ app.get("/api/export/:id/pdf", (req, res) => {
 
     doc.pipe(res);
 
-    // Header
-    doc.fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
+    // Main Header
+    doc.font('Helvetica-Bold').fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
     doc.moveDown();
 
-    // Account Info
-    doc.fontSize(14).fillColor("#393392").text("Client Information", { underline: true });
-    doc.fontSize(11).fillColor("#000000");
+    // Client Info Header
+    doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text("Client Information", { underline: true });
+    doc.moveDown(0.5);
+
+    // Client details
+    doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
     doc.text(`Account: ${sow.account_name}`);
-    if (sow.account_company) doc.text(`Company: ${sow.account_company}`);
+    if (sow.account_contact) doc.text(`Contact: ${sow.account_contact}`);
     doc.text(`Date: ${new Date(sow.created_at).toLocaleDateString()}`);
     doc.moveDown();
 
-    // Content
-    doc.fontSize(11).fillColor("#000000").text(sow.content, { align: "left" });
+    // Parse and format content with tables
+    const lines = sow.content.split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (line.trim() === '') {
+        doc.moveDown(0.5);
+        i++;
+        continue;
+      }
+
+      // Check for table
+      if (line.trim().startsWith('|')) {
+        const table = parseTable(lines, i);
+        if (table) {
+          renderPDFTable(doc, table);
+          i = table.endIndex;
+          continue;
+        }
+      }
+
+      // Check if line is a main header
+      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+        doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text(headerText);
+        doc.moveDown(0.5);
+      }
+      // Check if line is a subheader
+      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+        doc.font('Helvetica-Bold').fontSize(14).fillColor("#393392").text(subHeaderText);
+        doc.moveDown(0.3);
+      }
+      // Regular content
+      else {
+        doc.font('Helvetica').fontSize(9.5).fillColor("#000000").text(line, { align: 'left' });
+      }
+
+      i++;
+    }
 
     doc.end();
   } catch (err) {
@@ -383,48 +501,204 @@ app.get("/api/export/:id/docx", async (req, res) => {
 
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.docx`;
 
+    // Parse content and create formatted paragraphs/tables
+    const contentElements = [];
+    const lines = sow.content.split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (line.trim() === '') {
+        contentElements.push(new Paragraph({ text: "" }));
+        i++;
+        continue;
+      }
+
+      // Check for table
+      if (line.trim().startsWith('|')) {
+        const table = parseTable(lines, i);
+        if (table) {
+          // Create table header row
+          const headerRow = new TableRow({
+            children: table.headers.map(header =>
+              new TableCell({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: header,
+                        bold: true,
+                        font: "Verdana",
+                        size: 19,
+                        color: "FFFFFF",
+                      }),
+                    ],
+                  }),
+                ],
+                shading: {
+                  fill: "707CF1",
+                },
+                verticalAlign: VerticalAlign.CENTER,
+              })
+            ),
+          });
+
+          // Create table data rows
+          const dataRows = table.rows.map(row =>
+            new TableRow({
+              children: row.map(cell =>
+                new TableCell({
+                  children: [
+                    new Paragraph({
+                      children: [
+                        new TextRun({
+                          text: cell,
+                          font: "Verdana",
+                          size: 19,
+                        }),
+                      ],
+                    }),
+                  ],
+                  verticalAlign: VerticalAlign.CENTER,
+                })
+              ),
+            })
+          );
+
+          // Create complete table
+          contentElements.push(
+            new Table({
+              rows: [headerRow, ...dataRows],
+              width: {
+                size: 100,
+                type: WidthType.PERCENTAGE,
+              },
+              borders: {
+                top: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+                bottom: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+                left: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+                right: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+                insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+                insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
+              },
+            })
+          );
+
+          i = table.endIndex;
+          continue;
+        }
+      }
+
+      // Check if line is a main header
+      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+        contentElements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: headerText,
+                bold: true,
+                font: "Verdana",
+                size: 32, // 16pt = 32 half-points
+                color: "707CF1",
+              }),
+            ],
+            spacing: { before: 200, after: 100 },
+          })
+        );
+      }
+      // Check if line is a subheader
+      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+        contentElements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: subHeaderText,
+                bold: true,
+                font: "Verdana",
+                size: 28, // 14pt = 28 half-points
+                color: "393392",
+              }),
+            ],
+            spacing: { before: 150, after: 75 },
+          })
+        );
+      }
+      // Regular content
+      else {
+        contentElements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: line,
+                font: "Verdana",
+                size: 19, // 9.5pt = 19 half-points
+              }),
+            ],
+          })
+        );
+      }
+
+      i++;
+    }
+
     const doc = new Document({
       sections: [
         {
           properties: {},
           children: [
             new Paragraph({
-              text: "Statement of Work",
-              heading: HeadingLevel.HEADING_1,
-              spacing: { after: 200 },
+              children: [
+                new TextRun({
+                  text: "Statement of Work",
+                  bold: true,
+                  font: "Verdana",
+                  size: 48, // 24pt
+                  color: "151744",
+                }),
+              ],
+              alignment: "center",
+              spacing: { after: 400 },
             }),
             new Paragraph({
-              text: "Client Information",
-              heading: HeadingLevel.HEADING_2,
+              children: [
+                new TextRun({
+                  text: "Client Information",
+                  bold: true,
+                  font: "Verdana",
+                  size: 32, // 16pt
+                  color: "707CF1",
+                  underline: {},
+                }),
+              ],
               spacing: { before: 200, after: 100 },
             }),
             new Paragraph({
               children: [
-                new TextRun({ text: "Account: ", bold: true }),
-                new TextRun(sow.account_name),
+                new TextRun({ text: "Account: ", bold: true, font: "Verdana", size: 19 }),
+                new TextRun({ text: sow.account_name, font: "Verdana", size: 19 }),
               ],
             }),
-            ...(sow.account_company
+            ...(sow.account_contact
               ? [
                   new Paragraph({
                     children: [
-                      new TextRun({ text: "Company: ", bold: true }),
-                      new TextRun(sow.account_company),
+                      new TextRun({ text: "Contact: ", bold: true, font: "Verdana", size: 19 }),
+                      new TextRun({ text: sow.account_contact, font: "Verdana", size: 19 }),
                     ],
                   }),
                 ]
               : []),
             new Paragraph({
               children: [
-                new TextRun({ text: "Date: ", bold: true }),
-                new TextRun(new Date(sow.created_at).toLocaleDateString()),
+                new TextRun({ text: "Date: ", bold: true, font: "Verdana", size: 19 }),
+                new TextRun({ text: new Date(sow.created_at).toLocaleDateString(), font: "Verdana", size: 19 }),
               ],
-              spacing: { after: 200 },
+              spacing: { after: 300 },
             }),
-            new Paragraph({
-              text: sow.content,
-              spacing: { before: 200 },
-            }),
+            ...contentElements,
           ],
         },
       ],

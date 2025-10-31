@@ -1,6 +1,189 @@
 import { useState, useEffect } from 'react';
 import { sowApi, exportApi } from '../services/api';
 
+// Helper function to parse markdown tables
+function parseTable(lines, startIndex) {
+  const tableLines = [];
+  let i = startIndex;
+
+  // Collect all consecutive table lines
+  while (i < lines.length && lines[i].trim().startsWith('|')) {
+    tableLines.push(lines[i]);
+    i++;
+  }
+
+  if (tableLines.length < 2) return null;
+
+  // Parse header
+  const headerCells = tableLines[0]
+    .split('|')
+    .map(cell => cell.trim())
+    .filter(cell => cell !== '');
+
+  // Skip separator row (index 1)
+  // Parse data rows
+  const dataRows = [];
+  for (let j = 2; j < tableLines.length; j++) {
+    const cells = tableLines[j]
+      .split('|')
+      .map(cell => cell.trim())
+      .filter(cell => cell !== '');
+    if (cells.length > 0) {
+      dataRows.push(cells);
+    }
+  }
+
+  return {
+    headers: headerCells,
+    rows: dataRows,
+    endIndex: i
+  };
+}
+
+// Helper function to format SOW content with proper styling
+function formatSOWContent(content) {
+  if (!content) return null;
+
+  const lines = content.split('\n');
+  const elements = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === '') {
+      elements.push(<br key={`br-${i}`} />);
+      i++;
+      continue;
+    }
+
+    // Check if this is the start of a table
+    if (line.trim().startsWith('|')) {
+      const table = parseTable(lines, i);
+      if (table) {
+        elements.push(
+          <table
+            key={`table-${i}`}
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              marginTop: '12px',
+              marginBottom: '12px',
+              fontFamily: 'Verdana, sans-serif',
+              fontSize: '9.5px',
+            }}
+          >
+            <thead>
+              <tr>
+                {table.headers.map((header, idx) => (
+                  <th
+                    key={idx}
+                    style={{
+                      border: '1px solid #ddd',
+                      padding: '8px',
+                      backgroundColor: '#707CF1',
+                      color: '#FFFFFF',
+                      fontWeight: 'bold',
+                      textAlign: 'left',
+                      fontFamily: 'Verdana, sans-serif',
+                      fontSize: '9.5px',
+                    }}
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((row, rowIdx) => (
+                <tr key={rowIdx}>
+                  {row.map((cell, cellIdx) => (
+                    <td
+                      key={cellIdx}
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '8px',
+                        fontFamily: 'Verdana, sans-serif',
+                        fontSize: '9.5px',
+                      }}
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+        i = table.endIndex;
+        continue;
+      }
+    }
+
+    // Main headers (## or all caps)
+    if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+      const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      elements.push(
+        <div
+          key={i}
+          style={{
+            fontFamily: 'Verdana, sans-serif',
+            fontSize: '16px',
+            color: '#707CF1',
+            fontWeight: 'bold',
+            marginTop: '16px',
+            marginBottom: '8px',
+          }}
+        >
+          {headerText}
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Subheaders (### or **text**)
+    if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+      const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      elements.push(
+        <div
+          key={i}
+          style={{
+            fontFamily: 'Verdana, sans-serif',
+            fontSize: '14px',
+            color: '#393392',
+            fontWeight: 'bold',
+            marginTop: '12px',
+            marginBottom: '6px',
+          }}
+        >
+          {subHeaderText}
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Regular content
+    elements.push(
+      <div
+        key={i}
+        style={{
+          fontFamily: 'Verdana, sans-serif',
+          fontSize: '9.5px',
+          color: '#000000',
+          lineHeight: '1.6',
+        }}
+      >
+        {line}
+      </div>
+    );
+    i++;
+  }
+
+  return elements;
+}
+
 function SOWList() {
   const [sows, setSows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,7 +303,7 @@ function SOWList() {
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Company</th>
+                  <th>Contact</th>
                   <th>Template</th>
                   <th>Created</th>
                   <th>Actions</th>
@@ -130,7 +313,7 @@ function SOWList() {
                 {filteredSOWs.map((sow) => (
                   <tr key={sow.id}>
                     <td>{sow.account_name}</td>
-                    <td>{sow.account_company || '-'}</td>
+                    <td>{sow.account_contact || '-'}</td>
                     <td>{sow.template_name || 'No template'}</td>
                     <td>{formatDate(sow.created_at)}</td>
                     <td>
@@ -180,7 +363,7 @@ function SOWList() {
 
             <div style={{ marginBottom: '1rem' }}>
               <strong>Account:</strong> {selectedSOW.account_name}
-              {selectedSOW.account_company && <> ({selectedSOW.account_company})</>}
+              {selectedSOW.account_contact && <> (Contact: {selectedSOW.account_contact})</>}
               <br />
               {selectedSOW.template_name && (
                 <>
@@ -191,7 +374,7 @@ function SOWList() {
               <strong>Created:</strong> {formatDate(selectedSOW.created_at)}
             </div>
 
-            <div className="sow-preview">{selectedSOW.content}</div>
+            <div className="sow-preview">{formatSOWContent(selectedSOW.content)}</div>
 
             <div className="modal-footer">
               <button
