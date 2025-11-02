@@ -10,7 +10,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps } from "./database.js";
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -325,6 +325,150 @@ app.delete("/api/users/:id", requireAdmin, (req, res) => {
 });
 
 // ============================================
+// PRODUCT MANAGEMENT ENDPOINTS
+// ============================================
+
+// Get all products
+app.get("/api/products", isAuthenticated, (req, res) => {
+  try {
+    const products = productOps.getAll();
+    res.json(products);
+  } catch (err) {
+    console.error("Error fetching products:", err);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+});
+
+// Get product by ID
+app.get("/api/products/:id", isAuthenticated, (req, res) => {
+  try {
+    const product = productOps.getById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    res.json(product);
+  } catch (err) {
+    console.error("Error fetching product:", err);
+    res.status(500).json({ error: "Failed to fetch product" });
+  }
+});
+
+// Create new product (Admin only)
+app.post("/api/products", requireAdmin, (req, res) => {
+  try {
+    const { name, portfolio, description } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "Product name is required" });
+    }
+    const id = productOps.create({ name, portfolio, description });
+    const product = productOps.getById(id);
+    res.status(201).json(product);
+  } catch (err) {
+    console.error("Error creating product:", err);
+    res.status(500).json({ error: "Failed to create product" });
+  }
+});
+
+// Update product (Admin only)
+app.put("/api/products/:id", requireAdmin, (req, res) => {
+  try {
+    const { name, portfolio, description } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "Product name is required" });
+    }
+    productOps.update(req.params.id, { name, portfolio, description });
+    const product = productOps.getById(req.params.id);
+    res.json(product);
+  } catch (err) {
+    console.error("Error updating product:", err);
+    res.status(500).json({ error: "Failed to update product" });
+  }
+});
+
+// Delete product (Admin only)
+app.delete("/api/products/:id", requireAdmin, (req, res) => {
+  try {
+    productOps.delete(req.params.id);
+    res.json({ message: "Product deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting product:", err);
+    res.status(500).json({ error: "Failed to delete product" });
+  }
+});
+
+// ============================================
+// ENGAGEMENT TYPE MANAGEMENT ENDPOINTS
+// ============================================
+
+// Get all engagement types
+app.get("/api/engagement-types", isAuthenticated, (req, res) => {
+  try {
+    const engagementTypes = engagementTypeOps.getAll();
+    res.json(engagementTypes);
+  } catch (err) {
+    console.error("Error fetching engagement types:", err);
+    res.status(500).json({ error: "Failed to fetch engagement types" });
+  }
+});
+
+// Get engagement type by ID
+app.get("/api/engagement-types/:id", isAuthenticated, (req, res) => {
+  try {
+    const engagementType = engagementTypeOps.getById(req.params.id);
+    if (!engagementType) {
+      return res.status(404).json({ error: "Engagement type not found" });
+    }
+    res.json(engagementType);
+  } catch (err) {
+    console.error("Error fetching engagement type:", err);
+    res.status(500).json({ error: "Failed to fetch engagement type" });
+  }
+});
+
+// Create new engagement type (Admin only)
+app.post("/api/engagement-types", requireAdmin, (req, res) => {
+  try {
+    const { name, category, description } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "Engagement type name is required" });
+    }
+    const id = engagementTypeOps.create({ name, category, description });
+    const engagementType = engagementTypeOps.getById(id);
+    res.status(201).json(engagementType);
+  } catch (err) {
+    console.error("Error creating engagement type:", err);
+    res.status(500).json({ error: "Failed to create engagement type" });
+  }
+});
+
+// Update engagement type (Admin only)
+app.put("/api/engagement-types/:id", requireAdmin, (req, res) => {
+  try {
+    const { name, category, description } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "Engagement type name is required" });
+    }
+    engagementTypeOps.update(req.params.id, { name, category, description });
+    const engagementType = engagementTypeOps.getById(req.params.id);
+    res.json(engagementType);
+  } catch (err) {
+    console.error("Error updating engagement type:", err);
+    res.status(500).json({ error: "Failed to update engagement type" });
+  }
+});
+
+// Delete engagement type (Admin only)
+app.delete("/api/engagement-types/:id", requireAdmin, (req, res) => {
+  try {
+    engagementTypeOps.delete(req.params.id);
+    res.json({ message: "Engagement type deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting engagement type:", err);
+    res.status(500).json({ error: "Failed to delete engagement type" });
+  }
+});
+
+// ============================================
 // ACCOUNT MANAGEMENT ENDPOINTS
 // ============================================
 
@@ -353,8 +497,8 @@ app.get("/api/accounts/:id", isAuthenticated, (req, res) => {
   }
 });
 
-// Create new account
-app.post("/api/accounts", isAuthenticated, (req, res) => {
+// Create new account (Admin only)
+app.post("/api/accounts", requireAdmin, (req, res) => {
   try {
     const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
@@ -369,8 +513,8 @@ app.post("/api/accounts", isAuthenticated, (req, res) => {
   }
 });
 
-// Update account
-app.put("/api/accounts/:id", isAuthenticated, (req, res) => {
+// Update account (Admin only)
+app.put("/api/accounts/:id", requireAdmin, (req, res) => {
   try {
     const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
@@ -385,8 +529,8 @@ app.put("/api/accounts/:id", isAuthenticated, (req, res) => {
   }
 });
 
-// Delete account
-app.delete("/api/accounts/:id", isAuthenticated, (req, res) => {
+// Delete account (Admin only)
+app.delete("/api/accounts/:id", requireAdmin, (req, res) => {
   try {
     accountOps.delete(req.params.id);
     res.json({ message: "Account deleted successfully" });

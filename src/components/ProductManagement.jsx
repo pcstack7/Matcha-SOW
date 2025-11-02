@@ -1,36 +1,34 @@
 import { useState, useEffect } from 'react';
 
-function AccountManagement({ userRole }) {
-  const [accounts, setAccounts] = useState([]);
+function ProductManagement({ userRole }) {
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    account_contact: '',
-    email: '',
-    phone: '',
-    notes: '',
+    portfolio: '',
+    description: '',
   });
 
   const isAdmin = userRole === 'admin';
 
   useEffect(() => {
-    loadAccounts();
+    loadProducts();
   }, []);
 
-  const loadAccounts = async () => {
+  const loadProducts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/accounts');
+      const response = await fetch('/api/products');
 
       if (!response.ok) {
-        throw new Error('Failed to fetch accounts');
+        throw new Error('Failed to fetch products');
       }
 
       const data = await response.json();
-      setAccounts(data);
+      setProducts(data);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -39,18 +37,20 @@ function AccountManagement({ userRole }) {
     }
   };
 
-  const handleOpenModal = (account = null) => {
-    if (account) {
-      setEditingAccount(account);
-      setFormData(account);
+  const handleOpenModal = (product = null) => {
+    if (product) {
+      setEditingProduct(product);
+      setFormData({
+        name: product.name,
+        portfolio: product.portfolio || '',
+        description: product.description || '',
+      });
     } else {
-      setEditingAccount(null);
+      setEditingProduct(null);
       setFormData({
         name: '',
-        account_contact: '',
-        email: '',
-        phone: '',
-        notes: '',
+        portfolio: '',
+        description: '',
       });
     }
     setShowModal(true);
@@ -58,22 +58,20 @@ function AccountManagement({ userRole }) {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setEditingAccount(null);
+    setEditingProduct(null);
     setFormData({
       name: '',
-      account_contact: '',
-      email: '',
-      phone: '',
-      notes: '',
+      portfolio: '',
+      description: '',
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editingAccount) {
-        // Update existing account
-        const response = await fetch(`/api/accounts/${editingAccount.id}`, {
+      if (editingProduct) {
+        // Update existing product
+        const response = await fetch(`/api/products/${editingProduct.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -83,11 +81,11 @@ function AccountManagement({ userRole }) {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to update account');
+          throw new Error(data.error || 'Failed to update product');
         }
       } else {
-        // Create new account
-        const response = await fetch('/api/accounts', {
+        // Create new product
+        const response = await fetch('/api/products', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -97,10 +95,10 @@ function AccountManagement({ userRole }) {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to create account');
+          throw new Error(data.error || 'Failed to create product');
         }
       }
-      loadAccounts();
+      loadProducts();
       handleCloseModal();
     } catch (err) {
       setError(err.message);
@@ -108,21 +106,21 @@ function AccountManagement({ userRole }) {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this account?')) {
+    if (!window.confirm('Are you sure you want to delete this product?')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/accounts/${id}`, {
+      const response = await fetch(`/api/products/${id}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to delete account');
+        throw new Error(data.error || 'Failed to delete product');
       }
 
-      loadAccounts();
+      loadProducts();
     } catch (err) {
       setError(err.message);
     }
@@ -132,7 +130,7 @@ function AccountManagement({ userRole }) {
     return (
       <div className="loading">
         <div className="spinner"></div>
-        <p>Loading accounts...</p>
+        <p>Loading products...</p>
       </div>
     );
   }
@@ -140,13 +138,13 @@ function AccountManagement({ userRole }) {
   return (
     <div>
       <div className="content-header">
-        <h2>Accounts Master</h2>
-        <p>Manage your client accounts and contact information</p>
+        <h2>Products Master</h2>
+        <p>Manage product portfolio and descriptions</p>
       </div>
 
       {!isAdmin && (
         <div className="alert alert-info">
-          You have view-only access. Contact an administrator to add or modify accounts.
+          You have view-only access. Contact an administrator to add or modify products.
         </div>
       )}
 
@@ -154,19 +152,19 @@ function AccountManagement({ userRole }) {
 
       <div className="card">
         <div className="card-header">
-          <h3>Accounts</h3>
+          <h3>Products</h3>
           {isAdmin && (
             <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-              + Add Account
+              + Add Product
             </button>
           )}
         </div>
 
-        {accounts.length === 0 ? (
+        {products.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
-            <p>No accounts yet.</p>
-            {isAdmin && <p>Click "Add Account" to create your first account.</p>}
+            <div className="empty-state-icon">📦</div>
+            <p>No products yet.</p>
+            {isAdmin && <p>Click "Add Product" to create your first product.</p>}
           </div>
         ) : (
           <div className="table-container">
@@ -174,31 +172,31 @@ function AccountManagement({ userRole }) {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Account Contact</th>
-                  <th>Email</th>
-                  <th>Phone</th>
+                  <th>Portfolio</th>
+                  <th>Description</th>
+                  <th>Created</th>
                   {isAdmin && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.id}>
-                    <td>{account.name}</td>
-                    <td>{account.account_contact || '-'}</td>
-                    <td>{account.email || '-'}</td>
-                    <td>{account.phone || '-'}</td>
+                {products.map((product) => (
+                  <tr key={product.id}>
+                    <td>{product.name}</td>
+                    <td>{product.portfolio || '-'}</td>
+                    <td>{product.description || '-'}</td>
+                    <td>{new Date(product.created_at).toLocaleDateString()}</td>
                     {isAdmin && (
                       <td>
                         <div className="action-buttons">
                           <button
                             className="btn btn-small btn-outline"
-                            onClick={() => handleOpenModal(account)}
+                            onClick={() => handleOpenModal(product)}
                           >
                             Edit
                           </button>
                           <button
                             className="btn btn-small btn-danger"
-                            onClick={() => handleDelete(account.id)}
+                            onClick={() => handleDelete(product.id)}
                           >
                             Delete
                           </button>
@@ -213,11 +211,12 @@ function AccountManagement({ userRole }) {
         )}
       </div>
 
+      {/* Product Form Modal */}
       {showModal && isAdmin && (
         <div className="modal-overlay" onClick={handleCloseModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{editingAccount ? 'Edit Account' : 'Add Account'}</h3>
+              <h3>{editingProduct ? 'Edit Product' : 'Add Product'}</h3>
               <button className="modal-close" onClick={handleCloseModal}>
                 ×
               </button>
@@ -225,7 +224,7 @@ function AccountManagement({ userRole }) {
 
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>Account Name *</label>
+                <label>Name *</label>
                 <input
                   type="text"
                   className="form-control"
@@ -236,42 +235,22 @@ function AccountManagement({ userRole }) {
               </div>
 
               <div className="form-group">
-                <label>Account Contact</label>
+                <label>Portfolio</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={formData.account_contact}
-                  onChange={(e) => setFormData({ ...formData, account_contact: e.target.value })}
+                  value={formData.portfolio}
+                  onChange={(e) => setFormData({ ...formData, portfolio: e.target.value })}
                 />
               </div>
 
               <div className="form-group">
-                <label>Email</label>
-                <input
-                  type="email"
-                  className="form-control"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Phone</label>
-                <input
-                  type="tel"
-                  className="form-control"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Notes</label>
+                <label>Description</label>
                 <textarea
                   className="form-control"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows="3"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows="4"
                 />
               </div>
 
@@ -280,7 +259,7 @@ function AccountManagement({ userRole }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  {editingAccount ? 'Update' : 'Create'} Account
+                  {editingProduct ? 'Update' : 'Create'} Product
                 </button>
               </div>
             </form>
@@ -291,4 +270,4 @@ function AccountManagement({ userRole }) {
   );
 }
 
-export default AccountManagement;
+export default ProductManagement;

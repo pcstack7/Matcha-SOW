@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import AccountManagement from './components/AccountManagement';
+import ProductManagement from './components/ProductManagement';
+import EngagementTypeManagement from './components/EngagementTypeManagement';
 import TemplateManagement from './components/TemplateManagement';
 import SOWGenerator from './components/SOWGenerator';
 import SOWList from './components/SOWList';
@@ -64,7 +66,11 @@ function App() {
       case 'history':
         return <SOWList />;
       case 'accounts':
-        return <AccountManagement />;
+        return <AccountManagement userRole={user?.role} />;
+      case 'products':
+        return <ProductManagement userRole={user?.role} />;
+      case 'engagement-types':
+        return <EngagementTypeManagement userRole={user?.role} />;
       case 'templates':
         return <TemplateManagement />;
       case 'users':
@@ -131,7 +137,19 @@ function App() {
             className={`nav-item ${activeView === 'accounts' ? 'active' : ''}`}
             onClick={() => setActiveView('accounts')}
           >
-            Manage Accounts
+            Accounts Master
+          </div>
+          <div
+            className={`nav-item ${activeView === 'products' ? 'active' : ''}`}
+            onClick={() => setActiveView('products')}
+          >
+            Products Master
+          </div>
+          <div
+            className={`nav-item ${activeView === 'engagement-types' ? 'active' : ''}`}
+            onClick={() => setActiveView('engagement-types')}
+          >
+            Engagement Types
           </div>
           <div
             className={`nav-item ${activeView === 'templates' ? 'active' : ''}`}
