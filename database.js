@@ -37,6 +37,23 @@ function migrateDatabase() {
 
 // Initialize database schema
 function initializeDatabase() {
+  // Users table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT,
+      role TEXT NOT NULL DEFAULT 'user',
+      auth_provider TEXT DEFAULT 'local',
+      azure_id TEXT UNIQUE,
+      display_name TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_login DATETIME
+    )
+  `);
+
   // Accounts table
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -83,6 +100,88 @@ function initializeDatabase() {
 // Initialize the database
 initializeDatabase();
 migrateDatabase();
+
+// User operations
+export const userOps = {
+  getAll: () => {
+    const stmt = db.prepare('SELECT id, username, email, role, auth_provider, display_name, is_active, created_at, last_login FROM users ORDER BY created_at DESC');
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare('SELECT id, username, email, role, auth_provider, display_name, is_active, created_at, last_login FROM users WHERE id = ?');
+    return stmt.get(id);
+  },
+
+  getByUsername: (username) => {
+    const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
+    return stmt.get(username);
+  },
+
+  getByEmail: (email) => {
+    const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
+    return stmt.get(email);
+  },
+
+  getByAzureId: (azureId) => {
+    const stmt = db.prepare('SELECT * FROM users WHERE azure_id = ?');
+    return stmt.get(azureId);
+  },
+
+  create: (user) => {
+    const stmt = db.prepare(`
+      INSERT INTO users (username, email, password_hash, role, auth_provider, azure_id, display_name, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      user.username,
+      user.email,
+      user.password_hash || null,
+      user.role || 'user',
+      user.auth_provider || 'local',
+      user.azure_id || null,
+      user.display_name || user.username,
+      user.is_active !== undefined ? user.is_active : 1
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, user) => {
+    const stmt = db.prepare(`
+      UPDATE users
+      SET username = ?, email = ?, role = ?, display_name = ?, is_active = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      user.username,
+      user.email,
+      user.role,
+      user.display_name,
+      user.is_active,
+      id
+    );
+  },
+
+  updatePassword: (id, passwordHash) => {
+    const stmt = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+    stmt.run(passwordHash, id);
+  },
+
+  updateLastLogin: (id) => {
+    const stmt = db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?');
+    stmt.run(id);
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare('DELETE FROM users WHERE id = ?');
+    stmt.run(id);
+  },
+
+  countAdmins: () => {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM users WHERE role = ? AND is_active = 1');
+    return stmt.get('admin').count;
+  }
+};
 
 // Account operations
 export const accountOps = {
