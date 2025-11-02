@@ -1,36 +1,34 @@
 import { useState, useEffect } from 'react';
 
-function AccountManagement({ userRole }) {
-  const [accounts, setAccounts] = useState([]);
+function EngagementTypeManagement({ userRole }) {
+  const [engagementTypes, setEngagementTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingType, setEditingType] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    account_contact: '',
-    email: '',
-    phone: '',
-    notes: '',
+    category: '',
+    description: '',
   });
 
   const isAdmin = userRole === 'admin';
 
   useEffect(() => {
-    loadAccounts();
+    loadEngagementTypes();
   }, []);
 
-  const loadAccounts = async () => {
+  const loadEngagementTypes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/accounts');
+      const response = await fetch('/api/engagement-types');
 
       if (!response.ok) {
-        throw new Error('Failed to fetch accounts');
+        throw new Error('Failed to fetch engagement types');
       }
 
       const data = await response.json();
-      setAccounts(data);
+      setEngagementTypes(data);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -39,18 +37,20 @@ function AccountManagement({ userRole }) {
     }
   };
 
-  const handleOpenModal = (account = null) => {
-    if (account) {
-      setEditingAccount(account);
-      setFormData(account);
+  const handleOpenModal = (type = null) => {
+    if (type) {
+      setEditingType(type);
+      setFormData({
+        name: type.name,
+        category: type.category || '',
+        description: type.description || '',
+      });
     } else {
-      setEditingAccount(null);
+      setEditingType(null);
       setFormData({
         name: '',
-        account_contact: '',
-        email: '',
-        phone: '',
-        notes: '',
+        category: '',
+        description: '',
       });
     }
     setShowModal(true);
@@ -58,22 +58,20 @@ function AccountManagement({ userRole }) {
 
   const handleCloseModal = () => {
     setShowModal(false);
-    setEditingAccount(null);
+    setEditingType(null);
     setFormData({
       name: '',
-      account_contact: '',
-      email: '',
-      phone: '',
-      notes: '',
+      category: '',
+      description: '',
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editingAccount) {
-        // Update existing account
-        const response = await fetch(`/api/accounts/${editingAccount.id}`, {
+      if (editingType) {
+        // Update existing engagement type
+        const response = await fetch(`/api/engagement-types/${editingType.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -83,11 +81,11 @@ function AccountManagement({ userRole }) {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to update account');
+          throw new Error(data.error || 'Failed to update engagement type');
         }
       } else {
-        // Create new account
-        const response = await fetch('/api/accounts', {
+        // Create new engagement type
+        const response = await fetch('/api/engagement-types', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -97,10 +95,10 @@ function AccountManagement({ userRole }) {
 
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || 'Failed to create account');
+          throw new Error(data.error || 'Failed to create engagement type');
         }
       }
-      loadAccounts();
+      loadEngagementTypes();
       handleCloseModal();
     } catch (err) {
       setError(err.message);
@@ -108,21 +106,21 @@ function AccountManagement({ userRole }) {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this account?')) {
+    if (!window.confirm('Are you sure you want to delete this engagement type?')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/accounts/${id}`, {
+      const response = await fetch(`/api/engagement-types/${id}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to delete account');
+        throw new Error(data.error || 'Failed to delete engagement type');
       }
 
-      loadAccounts();
+      loadEngagementTypes();
     } catch (err) {
       setError(err.message);
     }
@@ -132,7 +130,7 @@ function AccountManagement({ userRole }) {
     return (
       <div className="loading">
         <div className="spinner"></div>
-        <p>Loading accounts...</p>
+        <p>Loading engagement types...</p>
       </div>
     );
   }
@@ -140,13 +138,13 @@ function AccountManagement({ userRole }) {
   return (
     <div>
       <div className="content-header">
-        <h2>Accounts Master</h2>
-        <p>Manage your client accounts and contact information</p>
+        <h2>Engagement Types Master</h2>
+        <p>Manage engagement categories and descriptions</p>
       </div>
 
       {!isAdmin && (
         <div className="alert alert-info">
-          You have view-only access. Contact an administrator to add or modify accounts.
+          You have view-only access. Contact an administrator to add or modify engagement types.
         </div>
       )}
 
@@ -154,19 +152,19 @@ function AccountManagement({ userRole }) {
 
       <div className="card">
         <div className="card-header">
-          <h3>Accounts</h3>
+          <h3>Engagement Types</h3>
           {isAdmin && (
             <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-              + Add Account
+              + Add Engagement Type
             </button>
           )}
         </div>
 
-        {accounts.length === 0 ? (
+        {engagementTypes.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
-            <p>No accounts yet.</p>
-            {isAdmin && <p>Click "Add Account" to create your first account.</p>}
+            <div className="empty-state-icon">🤝</div>
+            <p>No engagement types yet.</p>
+            {isAdmin && <p>Click "Add Engagement Type" to create your first engagement type.</p>}
           </div>
         ) : (
           <div className="table-container">
@@ -174,31 +172,31 @@ function AccountManagement({ userRole }) {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Account Contact</th>
-                  <th>Email</th>
-                  <th>Phone</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Created</th>
                   {isAdmin && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.id}>
-                    <td>{account.name}</td>
-                    <td>{account.account_contact || '-'}</td>
-                    <td>{account.email || '-'}</td>
-                    <td>{account.phone || '-'}</td>
+                {engagementTypes.map((type) => (
+                  <tr key={type.id}>
+                    <td>{type.name}</td>
+                    <td>{type.category || '-'}</td>
+                    <td>{type.description || '-'}</td>
+                    <td>{new Date(type.created_at).toLocaleDateString()}</td>
                     {isAdmin && (
                       <td>
                         <div className="action-buttons">
                           <button
                             className="btn btn-small btn-outline"
-                            onClick={() => handleOpenModal(account)}
+                            onClick={() => handleOpenModal(type)}
                           >
                             Edit
                           </button>
                           <button
                             className="btn btn-small btn-danger"
-                            onClick={() => handleDelete(account.id)}
+                            onClick={() => handleDelete(type.id)}
                           >
                             Delete
                           </button>
@@ -213,11 +211,12 @@ function AccountManagement({ userRole }) {
         )}
       </div>
 
+      {/* Engagement Type Form Modal */}
       {showModal && isAdmin && (
         <div className="modal-overlay" onClick={handleCloseModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{editingAccount ? 'Edit Account' : 'Add Account'}</h3>
+              <h3>{editingType ? 'Edit Engagement Type' : 'Add Engagement Type'}</h3>
               <button className="modal-close" onClick={handleCloseModal}>
                 ×
               </button>
@@ -225,7 +224,7 @@ function AccountManagement({ userRole }) {
 
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>Account Name *</label>
+                <label>Name *</label>
                 <input
                   type="text"
                   className="form-control"
@@ -236,42 +235,22 @@ function AccountManagement({ userRole }) {
               </div>
 
               <div className="form-group">
-                <label>Account Contact</label>
+                <label>Category</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={formData.account_contact}
-                  onChange={(e) => setFormData({ ...formData, account_contact: e.target.value })}
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 />
               </div>
 
               <div className="form-group">
-                <label>Email</label>
-                <input
-                  type="email"
-                  className="form-control"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Phone</label>
-                <input
-                  type="tel"
-                  className="form-control"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Notes</label>
+                <label>Description</label>
                 <textarea
                   className="form-control"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows="3"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows="4"
                 />
               </div>
 
@@ -280,7 +259,7 @@ function AccountManagement({ userRole }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  {editingAccount ? 'Update' : 'Create'} Account
+                  {editingType ? 'Update' : 'Create'} Engagement Type
                 </button>
               </div>
             </form>
@@ -291,4 +270,4 @@ function AccountManagement({ userRole }) {
   );
 }
 
-export default AccountManagement;
+export default EngagementTypeManagement;

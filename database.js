@@ -79,6 +79,28 @@ function initializeDatabase() {
     )
   `);
 
+  // Products table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      portfolio TEXT,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Engagement Types table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS engagement_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // SOWs table
   db.exec(`
     CREATE TABLE IF NOT EXISTS sows (
@@ -318,6 +340,96 @@ export const sowOps = {
 
   delete: (id) => {
     const stmt = db.prepare('DELETE FROM sows WHERE id = ?');
+    stmt.run(id);
+  }
+};
+
+// Product operations
+export const productOps = {
+  getAll: () => {
+    const stmt = db.prepare('SELECT * FROM products ORDER BY created_at DESC');
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare('SELECT * FROM products WHERE id = ?');
+    return stmt.get(id);
+  },
+
+  create: (product) => {
+    const stmt = db.prepare(`
+      INSERT INTO products (name, portfolio, description)
+      VALUES (?, ?, ?)
+    `);
+    const result = stmt.run(
+      product.name,
+      product.portfolio || null,
+      product.description || null
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, product) => {
+    const stmt = db.prepare(`
+      UPDATE products
+      SET name = ?, portfolio = ?, description = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      product.name,
+      product.portfolio || null,
+      product.description || null,
+      id
+    );
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare('DELETE FROM products WHERE id = ?');
+    stmt.run(id);
+  }
+};
+
+// Engagement Type operations
+export const engagementTypeOps = {
+  getAll: () => {
+    const stmt = db.prepare('SELECT * FROM engagement_types ORDER BY created_at DESC');
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare('SELECT * FROM engagement_types WHERE id = ?');
+    return stmt.get(id);
+  },
+
+  create: (engagementType) => {
+    const stmt = db.prepare(`
+      INSERT INTO engagement_types (name, category, description)
+      VALUES (?, ?, ?)
+    `);
+    const result = stmt.run(
+      engagementType.name,
+      engagementType.category || null,
+      engagementType.description || null
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, engagementType) => {
+    const stmt = db.prepare(`
+      UPDATE engagement_types
+      SET name = ?, category = ?, description = ?
+      WHERE id = ?
+    `);
+    stmt.run(
+      engagementType.name,
+      engagementType.category || null,
+      engagementType.description || null,
+      id
+    );
+  },
+
+  delete: (id) => {
+    const stmt = db.prepare('DELETE FROM engagement_types WHERE id = ?');
     stmt.run(id);
   }
 };
