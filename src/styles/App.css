@@ -578,6 +578,16 @@ select.form-control {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.sidebar-footer .btn-outline {
+  border-color: var(--primary-white);
+  color: var(--primary-white);
+}
+
+.sidebar-footer .btn-outline:hover:not(:disabled) {
+  background-color: var(--primary-white);
+  color: var(--primary-dark);
+}
+
 /* Loading Screen */
 .loading-screen {
   min-height: 100vh;
