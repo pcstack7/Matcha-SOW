@@ -8,6 +8,7 @@ yarn-error.log*
 
 # Database
 sow.db
+sessions.db
 
 # Uploads
 uploads/
