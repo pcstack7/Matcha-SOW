@@ -5,9 +5,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
+import session from "express-session";
+import connectSqlite3 from "connect-sqlite3";
+import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps } from "./database.js";
+import passport from "./auth/passport-config.js";
+import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
+import { initializeDefaultAdmin } from "./auth/init-admin.js";
 
 dotenv.config();
 
@@ -17,6 +23,31 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize session store
+const SQLiteStore = connectSqlite3(session);
+
+// Session configuration
+app.use(
+  session({
+    store: new SQLiteStore({ db: "sessions.db", dir: __dirname }),
+    secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    },
+  })
+);
+
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Initialize default admin user
+await initializeDefaultAdmin();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -54,11 +85,251 @@ if (!API_KEY) {
 }
 
 // ============================================
+// AUTHENTICATION ENDPOINTS
+// ============================================
+
+// Register new user
+app.post("/auth/register", async (req, res) => {
+  try {
+    const { username, email, password, displayName } = req.body;
+
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: "Username, email, and password are required" });
+    }
+
+    // Check if username already exists
+    if (userOps.getByUsername(username)) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+
+    // Check if email already exists
+    if (userOps.getByEmail(email)) {
+      return res.status(400).json({ error: "Email already exists" });
+    }
+
+    // Hash password
+    const password_hash = await bcrypt.hash(password, 10);
+
+    // Create user
+    const id = userOps.create({
+      username,
+      email,
+      password_hash,
+      role: "user", // New users are regular users by default
+      auth_provider: "local",
+      display_name: displayName || username,
+      is_active: 1,
+    });
+
+    const user = userOps.getById(id);
+    res.status(201).json({ message: "User registered successfully", user });
+  } catch (err) {
+    console.error("Error registering user:", err);
+    res.status(500).json({ error: "Failed to register user" });
+  }
+});
+
+// Login
+app.post("/auth/login", (req, res, next) => {
+  passport.authenticate("local", (err, user, info) => {
+    if (err) {
+      return res.status(500).json({ error: "Authentication error" });
+    }
+    if (!user) {
+      return res.status(401).json({ error: info.message || "Invalid credentials" });
+    }
+
+    req.login(user, (err) => {
+      if (err) {
+        return res.status(500).json({ error: "Login error" });
+      }
+      return res.json({ message: "Login successful", user });
+    });
+  })(req, res, next);
+});
+
+// Logout
+app.post("/auth/logout", (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      return res.status(500).json({ error: "Logout error" });
+    }
+    res.json({ message: "Logout successful" });
+  });
+});
+
+// Get current session/user
+app.get("/auth/session", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.json({ authenticated: true, user: req.user });
+  } else {
+    res.json({ authenticated: false, user: null });
+  }
+});
+
+// ============================================
+// USER MANAGEMENT ENDPOINTS (Admin Only)
+// ============================================
+
+// Get all users
+app.get("/api/users", requireAdmin, (req, res) => {
+  try {
+    const users = userOps.getAll();
+    res.json(users);
+  } catch (err) {
+    console.error("Error fetching users:", err);
+    res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
+// Get user by ID
+app.get("/api/users/:id", requireAdmin, (req, res) => {
+  try {
+    const user = userOps.getById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json(user);
+  } catch (err) {
+    console.error("Error fetching user:", err);
+    res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+// Create new user
+app.post("/api/users", requireAdmin, async (req, res) => {
+  try {
+    const { username, email, password, role, displayName, is_active } = req.body;
+
+    if (!username || !email) {
+      return res.status(400).json({ error: "Username and email are required" });
+    }
+
+    // Check if username already exists
+    if (userOps.getByUsername(username)) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+
+    // Check if email already exists
+    if (userOps.getByEmail(email)) {
+      return res.status(400).json({ error: "Email already exists" });
+    }
+
+    let password_hash = null;
+    if (password) {
+      password_hash = await bcrypt.hash(password, 10);
+    }
+
+    const id = userOps.create({
+      username,
+      email,
+      password_hash,
+      role: role || "user",
+      auth_provider: "local",
+      display_name: displayName || username,
+      is_active: is_active !== undefined ? is_active : 1,
+    });
+
+    const user = userOps.getById(id);
+    res.status(201).json(user);
+  } catch (err) {
+    console.error("Error creating user:", err);
+    res.status(500).json({ error: "Failed to create user" });
+  }
+});
+
+// Update user
+app.put("/api/users/:id", requireAdmin, (req, res) => {
+  try {
+    const { username, email, role, display_name, is_active } = req.body;
+
+    if (!username || !email) {
+      return res.status(400).json({ error: "Username and email are required" });
+    }
+
+    const existingUser = userOps.getById(req.params.id);
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if trying to deactivate the last admin
+    if (existingUser.role === "admin" && (role !== "admin" || is_active === 0)) {
+      const adminCount = userOps.countAdmins();
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: "Cannot modify the last active admin" });
+      }
+    }
+
+    userOps.update(req.params.id, {
+      username,
+      email,
+      role,
+      display_name,
+      is_active,
+    });
+
+    const user = userOps.getById(req.params.id);
+    res.json(user);
+  } catch (err) {
+    console.error("Error updating user:", err);
+    res.status(500).json({ error: "Failed to update user" });
+  }
+});
+
+// Change user password
+app.put("/api/users/:id/password", requireAdmin, async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
+    const user = userOps.getById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+    userOps.updatePassword(req.params.id, password_hash);
+
+    res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error("Error updating password:", err);
+    res.status(500).json({ error: "Failed to update password" });
+  }
+});
+
+// Delete user
+app.delete("/api/users/:id", requireAdmin, (req, res) => {
+  try {
+    const user = userOps.getById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Prevent deleting the last admin
+    if (user.role === "admin") {
+      const adminCount = userOps.countAdmins();
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: "Cannot delete the last active admin" });
+      }
+    }
+
+    userOps.delete(req.params.id);
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting user:", err);
+    res.status(500).json({ error: "Failed to delete user" });
+  }
+});
+
+// ============================================
 // ACCOUNT MANAGEMENT ENDPOINTS
 // ============================================
 
 // Get all accounts
-app.get("/api/accounts", (req, res) => {
+app.get("/api/accounts", isAuthenticated, (req, res) => {
   try {
     const accounts = accountOps.getAll();
     res.json(accounts);
@@ -69,7 +340,7 @@ app.get("/api/accounts", (req, res) => {
 });
 
 // Get account by ID
-app.get("/api/accounts/:id", (req, res) => {
+app.get("/api/accounts/:id", isAuthenticated, (req, res) => {
   try {
     const account = accountOps.getById(req.params.id);
     if (!account) {
@@ -83,7 +354,7 @@ app.get("/api/accounts/:id", (req, res) => {
 });
 
 // Create new account
-app.post("/api/accounts", (req, res) => {
+app.post("/api/accounts", isAuthenticated, (req, res) => {
   try {
     const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
@@ -99,7 +370,7 @@ app.post("/api/accounts", (req, res) => {
 });
 
 // Update account
-app.put("/api/accounts/:id", (req, res) => {
+app.put("/api/accounts/:id", isAuthenticated, (req, res) => {
   try {
     const { name, account_contact, email, phone, notes } = req.body;
     if (!name) {
@@ -115,7 +386,7 @@ app.put("/api/accounts/:id", (req, res) => {
 });
 
 // Delete account
-app.delete("/api/accounts/:id", (req, res) => {
+app.delete("/api/accounts/:id", isAuthenticated, (req, res) => {
   try {
     accountOps.delete(req.params.id);
     res.json({ message: "Account deleted successfully" });
@@ -130,7 +401,7 @@ app.delete("/api/accounts/:id", (req, res) => {
 // ============================================
 
 // Get all templates
-app.get("/api/templates", (req, res) => {
+app.get("/api/templates", isAuthenticated, (req, res) => {
   try {
     const templates = templateOps.getAll();
     res.json(templates);
@@ -141,7 +412,7 @@ app.get("/api/templates", (req, res) => {
 });
 
 // Upload template
-app.post("/api/templates", upload.single("file"), async (req, res) => {
+app.post("/api/templates", isAuthenticated, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
@@ -173,7 +444,7 @@ app.post("/api/templates", upload.single("file"), async (req, res) => {
 });
 
 // Delete template
-app.delete("/api/templates/:id", (req, res) => {
+app.delete("/api/templates/:id", isAuthenticated, (req, res) => {
   try {
     const template = templateOps.getById(req.params.id);
     if (!template) {
@@ -198,7 +469,7 @@ app.delete("/api/templates/:id", (req, res) => {
 // ============================================
 
 // Get all SOWs
-app.get("/api/sows", (req, res) => {
+app.get("/api/sows", isAuthenticated, (req, res) => {
   try {
     const sows = sowOps.getAll();
     res.json(sows);
@@ -209,7 +480,7 @@ app.get("/api/sows", (req, res) => {
 });
 
 // Get SOW by ID
-app.get("/api/sows/:id", (req, res) => {
+app.get("/api/sows/:id", isAuthenticated, (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {
@@ -223,7 +494,7 @@ app.get("/api/sows/:id", (req, res) => {
 });
 
 // Get SOWs by account ID
-app.get("/api/sows/account/:accountId", (req, res) => {
+app.get("/api/sows/account/:accountId", isAuthenticated, (req, res) => {
   try {
     const sows = sowOps.getByAccountId(req.params.accountId);
     res.json(sows);
@@ -234,7 +505,7 @@ app.get("/api/sows/account/:accountId", (req, res) => {
 });
 
 // Generate SOW using AI
-app.post("/api/sows/generate", async (req, res) => {
+app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
   try {
     const { account_id, template_id, project_notes, deliverables } = req.body;
 
@@ -321,7 +592,7 @@ Format the output as a well-structured document with clear section headers and s
 });
 
 // Delete SOW
-app.delete("/api/sows/:id", (req, res) => {
+app.delete("/api/sows/:id", isAuthenticated, (req, res) => {
   try {
     sowOps.delete(req.params.id);
     res.json({ message: "SOW deleted successfully" });
@@ -411,7 +682,7 @@ function renderPDFTable(doc, table) {
 }
 
 // Export SOW to PDF
-app.get("/api/export/:id/pdf", (req, res) => {
+app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {
@@ -492,7 +763,7 @@ app.get("/api/export/:id/pdf", (req, res) => {
 });
 
 // Export SOW to DOCX
-app.get("/api/export/:id/docx", async (req, res) => {
+app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {
@@ -716,7 +987,7 @@ app.get("/api/export/:id/docx", async (req, res) => {
 });
 
 // Export SOW to TXT
-app.get("/api/export/:id/txt", (req, res) => {
+app.get("/api/export/:id/txt", isAuthenticated, (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {

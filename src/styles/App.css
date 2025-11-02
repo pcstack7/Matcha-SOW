@@ -461,3 +461,172 @@ select.form-control {
 
 .gap-1 { gap: 0.5rem; }
 .gap-2 { gap: 1rem; }
+
+/* Authentication Styles */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-purple) 50%, var(--primary-light) 100%);
+  padding: 2rem;
+}
+
+.login-card {
+  background: var(--primary-white);
+  border-radius: 16px;
+  padding: 3rem;
+  width: 100%;
+  max-width: 450px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.login-header h1 {
+  font-size: 2.5rem;
+  color: var(--primary-dark);
+  margin-bottom: 0.5rem;
+}
+
+.login-header p {
+  color: var(--gray-dark);
+  font-size: 1rem;
+}
+
+.login-footer {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--gray-medium);
+  text-align: center;
+  color: var(--gray-dark);
+  font-size: 0.9rem;
+}
+
+.login-footer p {
+  margin-bottom: 0.5rem;
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--primary-light);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--primary-purple);
+}
+
+/* User Info in Sidebar */
+.user-info {
+  padding: 1rem 1.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 0 1rem 1.5rem;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-light) 0%, var(--secondary-cyan) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 1.2rem;
+  color: var(--primary-white);
+  text-transform: uppercase;
+}
+
+.user-details {
+  flex: 1;
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.user-role {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: capitalize;
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 1rem 1.5rem;
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Loading Screen */
+.loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-purple) 50%, var(--primary-light) 100%);
+  color: var(--primary-white);
+}
+
+.loading-screen p {
+  margin-top: 1rem;
+  font-size: 1.1rem;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.badge-primary {
+  background-color: var(--primary-light);
+  color: var(--primary-white);
+}
+
+.badge-secondary {
+  background-color: var(--gray-medium);
+  color: var(--primary-dark);
+}
+
+.badge-success {
+  background-color: var(--success-green);
+  color: var(--primary-white);
+}
+
+.badge-danger {
+  background-color: var(--primary-pink);
+  color: var(--primary-white);
+}
+
+/* Form Small Text */
+.form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--gray-dark);
+  font-size: 0.85rem;
+}
