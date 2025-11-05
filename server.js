@@ -931,13 +931,22 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
         doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
         doc.moveDown(0.3);
       }
-      // Check if line is a bullet point
+      // Check if line is a bullet point but NOT if content is all bold
       else if (line.match(/^\s*[-*•]\s+/)) {
-        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
-        const currentY = doc.y;
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
-        doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
-        renderTextWithBold(bulletText, doc, { indent: 20, lineGap: 2 });
+        const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
+
+        // If the content after the bullet is entirely bold, treat as subheader
+        if (bulletContent.match(/^\*\*.*\*\*$/)) {
+          const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
+          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
+          doc.moveDown(0.3);
+        } else {
+          // Regular bullet point
+          const currentY = doc.y;
+          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
+          doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
+          renderTextWithBold(bulletContent, doc, { indent: 30, lineGap: 2 });
+        }
       }
       // Regular content
       else {
@@ -1136,22 +1145,43 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       }
       // Check if line is a bullet point
       else if (line.match(/^\s*[-*•]\s+/)) {
-        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
-        contentElements.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: '• ',
-                font: "Verdana",
-                size: 19,
-                color: "5E63CD",
-                bold: true,
-              }),
-              ...parseInlineMarkdownForDocx(bulletText),
-            ],
-            indent: { left: 360 }, // Indent bullets
-          })
-        );
+        const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
+
+        // If content after bullet is entirely bold, treat as subheader
+        if (bulletContent.match(/^\*\*.*\*\*$/)) {
+          const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
+          contentElements.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: subHeaderText,
+                  bold: true,
+                  font: "Verdana",
+                  size: 19, // 9.5pt = 19 half-points
+                  color: "5E63CD",
+                }),
+              ],
+              spacing: { before: 150, after: 75 },
+            })
+          );
+        } else {
+          // Regular bullet with better spacing
+          contentElements.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: '•  ', // Added extra space
+                  font: "Verdana",
+                  size: 19, // 9.5pt = 19 half-points
+                  color: "5E63CD",
+                  bold: true,
+                }),
+                ...parseInlineMarkdownForDocx(bulletContent),
+              ],
+              indent: { left: 360 }, // Indent bullets
+            })
+          );
+        }
       }
       // Regular content
       else {
