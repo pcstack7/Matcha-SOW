@@ -807,31 +807,58 @@ function renderPDFTable(doc, table) {
   const columnWidth = pageWidth / table.headers.length;
   const rowHeight = 20;
 
+  // Helper to render text with bold markdown
+  const renderCellWithBold = (text, x, y, width, color) => {
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    let lastIndex = 0;
+    let match;
+    let currentX = x + 5;
+
+    while ((match = boldRegex.exec(text)) !== null) {
+      // Render text before bold
+      if (match.index > lastIndex) {
+        const beforeText = text.substring(lastIndex, match.index);
+        doc.font('Helvetica').fontSize(9.5).fillColor(color).text(beforeText, currentX, y + 5, {
+          width: width - 10,
+          height: rowHeight - 10,
+          align: 'left',
+          continued: true
+        });
+      }
+      // Render bold text
+      doc.font('Helvetica-Bold').text(match[1], { continued: true });
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Render remaining text
+    if (lastIndex < text.length) {
+      doc.font('Helvetica').text(text.substring(lastIndex));
+    } else if (lastIndex > 0) {
+      doc.text(''); // Complete the line
+    } else {
+      doc.font('Helvetica').fontSize(9.5).fillColor(color).text(text, x + 5, y + 5, {
+        width: width - 10,
+        height: rowHeight - 10,
+        align: 'left'
+      });
+    }
+  };
+
   // Draw headers
-  doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#FFFFFF");
   table.headers.forEach((header, i) => {
     const x = startX + (i * columnWidth);
     doc.rect(x, startY, columnWidth, rowHeight).fillAndStroke("#707CF1", "#ddd");
-    doc.fillColor("#FFFFFF").text(header, x + 5, startY + 5, {
-      width: columnWidth - 10,
-      height: rowHeight - 10,
-      align: 'left'
-    });
+    renderCellWithBold(header, x, startY, columnWidth, "#FFFFFF");
   });
 
   // Draw rows
-  doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
   let currentY = startY + rowHeight;
 
   table.rows.forEach((row, rowIdx) => {
     row.forEach((cell, cellIdx) => {
       const x = startX + (cellIdx * columnWidth);
       doc.rect(x, currentY, columnWidth, rowHeight).stroke("#ddd");
-      doc.fillColor("#000000").text(cell, x + 5, currentY + 5, {
-        width: columnWidth - 10,
-        height: rowHeight - 10,
-        align: 'left'
-      });
+      renderCellWithBold(cell, x, currentY, columnWidth, "#000000");
     });
     currentY += rowHeight;
   });
@@ -931,13 +958,22 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
         doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
         doc.moveDown(0.3);
       }
-      // Check if line is a bullet point
+      // Check if line is a bullet point but NOT if content is all bold
       else if (line.match(/^\s*[-*•]\s+/)) {
-        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
-        const currentY = doc.y;
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
-        doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
-        renderTextWithBold(bulletText, doc, { indent: 20, lineGap: 2 });
+        const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
+
+        // If the content after the bullet is entirely bold, treat as subheader
+        if (bulletContent.match(/^\*\*.*\*\*$/)) {
+          const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
+          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
+          doc.moveDown(0.3);
+        } else {
+          // Regular bullet point
+          const currentY = doc.y;
+          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
+          doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
+          renderTextWithBold(bulletContent, doc, { indent: 30, lineGap: 2 });
+        }
       }
       // Regular content
       else {
@@ -1033,15 +1069,11 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
               new TableCell({
                 children: [
                   new Paragraph({
-                    children: [
-                      new TextRun({
-                        text: header,
-                        bold: true,
-                        font: "Verdana",
-                        size: 19,
-                        color: "FFFFFF",
-                      }),
-                    ],
+                    children: parseInlineMarkdownForDocx(header).map(run => {
+                      run.bold = true;
+                      run.color = "FFFFFF";
+                      return run;
+                    }),
                   }),
                 ],
                 shading: {
@@ -1059,13 +1091,7 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                 new TableCell({
                   children: [
                     new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: cell,
-                          font: "Verdana",
-                          size: 19,
-                        }),
-                      ],
+                      children: parseInlineMarkdownForDocx(cell),
                     }),
                   ],
                   verticalAlign: VerticalAlign.CENTER,
@@ -1136,22 +1162,43 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       }
       // Check if line is a bullet point
       else if (line.match(/^\s*[-*•]\s+/)) {
-        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
-        contentElements.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: '• ',
-                font: "Verdana",
-                size: 19,
-                color: "5E63CD",
-                bold: true,
-              }),
-              ...parseInlineMarkdownForDocx(bulletText),
-            ],
-            indent: { left: 360 }, // Indent bullets
-          })
-        );
+        const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
+
+        // If content after bullet is entirely bold, treat as subheader
+        if (bulletContent.match(/^\*\*.*\*\*$/)) {
+          const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
+          contentElements.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: subHeaderText,
+                  bold: true,
+                  font: "Verdana",
+                  size: 19, // 9.5pt = 19 half-points
+                  color: "5E63CD",
+                }),
+              ],
+              spacing: { before: 150, after: 75 },
+            })
+          );
+        } else {
+          // Regular bullet with better spacing
+          contentElements.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: '•  ', // Added extra space
+                  font: "Verdana",
+                  size: 19, // 9.5pt = 19 half-points
+                  color: "5E63CD",
+                  bold: true,
+                }),
+                ...parseInlineMarkdownForDocx(bulletContent),
+              ],
+              indent: { left: 360 }, // Indent bullets
+            })
+          );
+        }
       }
       // Regular content
       else {

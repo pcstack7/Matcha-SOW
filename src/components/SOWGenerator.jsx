@@ -114,7 +114,7 @@ function formatSOWContent(content) {
                       fontSize: '9.5px',
                     }}
                   >
-                    {header}
+                    {parseInlineMarkdown(header)}
                   </th>
                 ))}
               </tr>
@@ -132,7 +132,7 @@ function formatSOWContent(content) {
                         fontSize: '9.5px',
                       }}
                     >
-                      {cell}
+                      {parseInlineMarkdown(cell)}
                     </td>
                   ))}
                 </tr>
@@ -189,9 +189,33 @@ function formatSOWContent(content) {
       continue;
     }
 
-    // Bullet points (-, *, or •)
+    // Bullet points (-, *, or •) but NOT if the content after bullet is all bold
     if (line.match(/^\s*[-*•]\s+/)) {
-      const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
+      const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
+
+      // If the content after the bullet is entirely bold (like * **Header**), treat as subheader
+      if (bulletContent.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
+        elements.push(
+          <div
+            key={i}
+            style={{
+              fontFamily: 'Verdana, sans-serif',
+              fontSize: '9.5px',
+              color: '#5E63CD',
+              fontWeight: 'bold',
+              marginTop: '12px',
+              marginBottom: '6px',
+            }}
+          >
+            {subHeaderText}
+          </div>
+        );
+        i++;
+        continue;
+      }
+
+      // Regular bullet point
       elements.push(
         <div
           key={i}
@@ -200,13 +224,13 @@ function formatSOWContent(content) {
             fontSize: '9.5px',
             color: '#000000',
             lineHeight: '1.6',
-            paddingLeft: '20px',
-            textIndent: '-15px',
+            paddingLeft: '30px',
+            textIndent: '-20px',
             marginBottom: '4px',
           }}
         >
-          <span style={{ color: '#5E63CD', fontWeight: 'bold' }}>• </span>
-          {parseInlineMarkdown(bulletText)}
+          <span style={{ color: '#5E63CD', fontWeight: 'bold', fontSize: '9.5px' }}>•&nbsp;&nbsp;</span>
+          {parseInlineMarkdown(bulletContent)}
         </div>
       );
       i++;
