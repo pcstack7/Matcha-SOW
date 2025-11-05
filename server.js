@@ -807,31 +807,58 @@ function renderPDFTable(doc, table) {
   const columnWidth = pageWidth / table.headers.length;
   const rowHeight = 20;
 
+  // Helper to render text with bold markdown
+  const renderCellWithBold = (text, x, y, width, color) => {
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    let lastIndex = 0;
+    let match;
+    let currentX = x + 5;
+
+    while ((match = boldRegex.exec(text)) !== null) {
+      // Render text before bold
+      if (match.index > lastIndex) {
+        const beforeText = text.substring(lastIndex, match.index);
+        doc.font('Helvetica').fontSize(9.5).fillColor(color).text(beforeText, currentX, y + 5, {
+          width: width - 10,
+          height: rowHeight - 10,
+          align: 'left',
+          continued: true
+        });
+      }
+      // Render bold text
+      doc.font('Helvetica-Bold').text(match[1], { continued: true });
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Render remaining text
+    if (lastIndex < text.length) {
+      doc.font('Helvetica').text(text.substring(lastIndex));
+    } else if (lastIndex > 0) {
+      doc.text(''); // Complete the line
+    } else {
+      doc.font('Helvetica').fontSize(9.5).fillColor(color).text(text, x + 5, y + 5, {
+        width: width - 10,
+        height: rowHeight - 10,
+        align: 'left'
+      });
+    }
+  };
+
   // Draw headers
-  doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#FFFFFF");
   table.headers.forEach((header, i) => {
     const x = startX + (i * columnWidth);
     doc.rect(x, startY, columnWidth, rowHeight).fillAndStroke("#707CF1", "#ddd");
-    doc.fillColor("#FFFFFF").text(header, x + 5, startY + 5, {
-      width: columnWidth - 10,
-      height: rowHeight - 10,
-      align: 'left'
-    });
+    renderCellWithBold(header, x, startY, columnWidth, "#FFFFFF");
   });
 
   // Draw rows
-  doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
   let currentY = startY + rowHeight;
 
   table.rows.forEach((row, rowIdx) => {
     row.forEach((cell, cellIdx) => {
       const x = startX + (cellIdx * columnWidth);
       doc.rect(x, currentY, columnWidth, rowHeight).stroke("#ddd");
-      doc.fillColor("#000000").text(cell, x + 5, currentY + 5, {
-        width: columnWidth - 10,
-        height: rowHeight - 10,
-        align: 'left'
-      });
+      renderCellWithBold(cell, x, currentY, columnWidth, "#000000");
     });
     currentY += rowHeight;
   });
@@ -1042,15 +1069,11 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
               new TableCell({
                 children: [
                   new Paragraph({
-                    children: [
-                      new TextRun({
-                        text: header,
-                        bold: true,
-                        font: "Verdana",
-                        size: 19,
-                        color: "FFFFFF",
-                      }),
-                    ],
+                    children: parseInlineMarkdownForDocx(header).map(run => {
+                      run.bold = true;
+                      run.color = "FFFFFF";
+                      return run;
+                    }),
                   }),
                 ],
                 shading: {
@@ -1068,13 +1091,7 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                 new TableCell({
                   children: [
                     new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: cell,
-                          font: "Verdana",
-                          size: 19,
-                        }),
-                      ],
+                      children: parseInlineMarkdownForDocx(cell),
                     }),
                   ],
                   verticalAlign: VerticalAlign.CENTER,

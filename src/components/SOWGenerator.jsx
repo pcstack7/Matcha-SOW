@@ -114,7 +114,7 @@ function formatSOWContent(content) {
                       fontSize: '9.5px',
                     }}
                   >
-                    {header}
+                    {parseInlineMarkdown(header)}
                   </th>
                 ))}
               </tr>
@@ -132,7 +132,7 @@ function formatSOWContent(content) {
                         fontSize: '9.5px',
                       }}
                     >
-                      {cell}
+                      {parseInlineMarkdown(cell)}
                     </td>
                   ))}
                 </tr>
