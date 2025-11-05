@@ -40,6 +40,31 @@ function parseTable(lines, startIndex) {
   };
 }
 
+// Helper function to parse inline markdown (bold, etc.)
+function parseInlineMarkdown(text) {
+  const parts = [];
+  let currentIndex = 0;
+  const boldRegex = /\*\*(.*?)\*\*/g;
+  let match;
+
+  while ((match = boldRegex.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > currentIndex) {
+      parts.push(text.substring(currentIndex, match.index));
+    }
+    // Add bold text
+    parts.push(<strong key={match.index}>{match[1]}</strong>);
+    currentIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text
+  if (currentIndex < text.length) {
+    parts.push(text.substring(currentIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
+}
+
 // Helper function to format SOW content with proper styling
 function formatSOWContent(content) {
   if (!content) return null;
@@ -150,8 +175,8 @@ function formatSOWContent(content) {
           key={i}
           style={{
             fontFamily: 'Verdana, sans-serif',
-            fontSize: '14px',
-            color: '#393392',
+            fontSize: '9.5px',
+            color: '#5E63CD',
             fontWeight: 'bold',
             marginTop: '12px',
             marginBottom: '6px',
@@ -164,7 +189,31 @@ function formatSOWContent(content) {
       continue;
     }
 
-    // Regular content
+    // Bullet points (-, *, or •)
+    if (line.match(/^\s*[-*•]\s+/)) {
+      const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
+      elements.push(
+        <div
+          key={i}
+          style={{
+            fontFamily: 'Verdana, sans-serif',
+            fontSize: '9.5px',
+            color: '#000000',
+            lineHeight: '1.6',
+            paddingLeft: '20px',
+            textIndent: '-15px',
+            marginBottom: '4px',
+          }}
+        >
+          <span style={{ color: '#5E63CD', fontWeight: 'bold' }}>• </span>
+          {parseInlineMarkdown(bulletText)}
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Regular content with inline markdown
     elements.push(
       <div
         key={i}
@@ -175,7 +224,7 @@ function formatSOWContent(content) {
           lineHeight: '1.6',
         }}
       >
-        {line}
+        {parseInlineMarkdown(line)}
       </div>
     );
     i++;

@@ -870,9 +870,35 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
     doc.text(`Date: ${new Date(sow.created_at).toLocaleDateString()}`);
     doc.moveDown();
 
-    // Parse and format content with tables
+    // Parse and format content with tables, bullets, and inline markdown
     const lines = sow.content.split('\n');
     let i = 0;
+
+    // Helper function to render text with inline bold markdown
+    const renderTextWithBold = (text, doc, options = {}) => {
+      const boldRegex = /\*\*(.*?)\*\*/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = boldRegex.exec(text)) !== null) {
+        // Render text before bold
+        if (match.index > lastIndex) {
+          doc.font('Helvetica').text(text.substring(lastIndex, match.index), { ...options, continued: true });
+        }
+        // Render bold text
+        doc.font('Helvetica-Bold').text(match[1], { ...options, continued: true });
+        lastIndex = match.index + match[0].length;
+      }
+
+      // Render remaining text
+      if (lastIndex < text.length) {
+        doc.font('Helvetica').text(text.substring(lastIndex), options);
+      } else if (lastIndex > 0) {
+        doc.text('', options); // Complete the line
+      } else {
+        doc.font('Helvetica').text(text, options);
+      }
+    };
 
     while (i < lines.length) {
       const line = lines[i];
@@ -902,12 +928,21 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
       // Check if line is a subheader
       else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
         const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
-        doc.font('Helvetica-Bold').fontSize(14).fillColor("#393392").text(subHeaderText);
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
         doc.moveDown(0.3);
+      }
+      // Check if line is a bullet point
+      else if (line.match(/^\s*[-*•]\s+/)) {
+        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
+        const currentY = doc.y;
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
+        doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
+        renderTextWithBold(bulletText, doc, { indent: 20, lineGap: 2 });
       }
       // Regular content
       else {
-        doc.font('Helvetica').fontSize(9.5).fillColor("#000000").text(line, { align: 'left' });
+        doc.fontSize(9.5).fillColor("#000000");
+        renderTextWithBold(line, doc, { align: 'left' });
       }
 
       i++;
@@ -929,6 +964,50 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
     }
 
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.docx`;
+
+    // Helper function to parse inline markdown (bold) for DOCX
+    const parseInlineMarkdownForDocx = (text) => {
+      const textRuns = [];
+      const boldRegex = /\*\*(.*?)\*\*/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = boldRegex.exec(text)) !== null) {
+        // Add text before the match
+        if (match.index > lastIndex) {
+          textRuns.push(
+            new TextRun({
+              text: text.substring(lastIndex, match.index),
+              font: "Verdana",
+              size: 19,
+            })
+          );
+        }
+        // Add bold text
+        textRuns.push(
+          new TextRun({
+            text: match[1],
+            bold: true,
+            font: "Verdana",
+            size: 19,
+          })
+        );
+        lastIndex = match.index + match[0].length;
+      }
+
+      // Add remaining text
+      if (lastIndex < text.length) {
+        textRuns.push(
+          new TextRun({
+            text: text.substring(lastIndex),
+            font: "Verdana",
+            size: 19,
+          })
+        );
+      }
+
+      return textRuns.length > 0 ? textRuns : [new TextRun({ text, font: "Verdana", size: 19 })];
+    };
 
     // Parse content and create formatted paragraphs/tables
     const contentElements = [];
@@ -1047,11 +1126,30 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                 text: subHeaderText,
                 bold: true,
                 font: "Verdana",
-                size: 28, // 14pt = 28 half-points
-                color: "393392",
+                size: 19, // 9.5pt = 19 half-points
+                color: "5E63CD",
               }),
             ],
             spacing: { before: 150, after: 75 },
+          })
+        );
+      }
+      // Check if line is a bullet point
+      else if (line.match(/^\s*[-*•]\s+/)) {
+        const bulletText = line.replace(/^\s*[-*•]\s+/, '').trim();
+        contentElements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: '• ',
+                font: "Verdana",
+                size: 19,
+                color: "5E63CD",
+                bold: true,
+              }),
+              ...parseInlineMarkdownForDocx(bulletText),
+            ],
+            indent: { left: 360 }, // Indent bullets
           })
         );
       }
@@ -1059,13 +1157,7 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       else {
         contentElements.push(
           new Paragraph({
-            children: [
-              new TextRun({
-                text: line,
-                font: "Verdana",
-                size: 19, // 9.5pt = 19 half-points
-              }),
-            ],
+            children: parseInlineMarkdownForDocx(line),
           })
         );
       }
