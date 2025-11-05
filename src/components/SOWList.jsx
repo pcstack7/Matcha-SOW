@@ -305,6 +305,7 @@ function SOWList() {
                   <th>Account</th>
                   <th>Contact</th>
                   <th>Template</th>
+                  <th>Created By</th>
                   <th>Created</th>
                   <th>Actions</th>
                 </tr>
@@ -315,6 +316,7 @@ function SOWList() {
                     <td>{sow.account_name}</td>
                     <td>{sow.account_contact || '-'}</td>
                     <td>{sow.template_name || 'No template'}</td>
+                    <td>{sow.created_by_display_name || sow.created_by_username || '-'}</td>
                     <td>{formatDate(sow.created_at)}</td>
                     <td>
                       <div className="action-buttons">
@@ -368,6 +370,24 @@ function SOWList() {
               {selectedSOW.template_name && (
                 <>
                   <strong>Template:</strong> {selectedSOW.template_name}
+                  <br />
+                </>
+              )}
+              {selectedSOW.product_name && (
+                <>
+                  <strong>Product:</strong> {selectedSOW.product_name}
+                  <br />
+                </>
+              )}
+              {selectedSOW.engagement_type_name && (
+                <>
+                  <strong>Engagement Type:</strong> {selectedSOW.engagement_type_name}
+                  <br />
+                </>
+              )}
+              {(selectedSOW.created_by_display_name || selectedSOW.created_by_username) && (
+                <>
+                  <strong>Created By:</strong> {selectedSOW.created_by_display_name || selectedSOW.created_by_username}
                   <br />
                 </>
               )}

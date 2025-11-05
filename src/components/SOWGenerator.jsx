@@ -187,6 +187,8 @@ function formatSOWContent(content) {
 function SOWGenerator() {
   const [accounts, setAccounts] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [engagementTypes, setEngagementTypes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -195,6 +197,8 @@ function SOWGenerator() {
   const [formData, setFormData] = useState({
     account_id: '',
     template_id: '',
+    product_id: '',
+    engagement_type_id: '',
     project_notes: '',
     deliverables: '',
   });
@@ -205,12 +209,16 @@ function SOWGenerator() {
 
   const loadData = async () => {
     try {
-      const [accountsData, templatesData] = await Promise.all([
+      const [accountsData, templatesData, productsData, engagementTypesData] = await Promise.all([
         accountApi.getAll(),
         templateApi.getAll(),
+        fetch('/api/products').then(res => res.json()),
+        fetch('/api/engagement-types').then(res => res.json()),
       ]);
       setAccounts(accountsData);
       setTemplates(templatesData);
+      setProducts(productsData);
+      setEngagementTypes(engagementTypesData);
     } catch (err) {
       setError('Failed to load data');
     }
@@ -237,6 +245,8 @@ function SOWGenerator() {
       setFormData({
         account_id: '',
         template_id: '',
+        product_id: '',
+        engagement_type_id: '',
         project_notes: '',
         deliverables: '',
       });
@@ -327,6 +337,48 @@ function SOWGenerator() {
             <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
               Templates help guide the AI to generate SOWs in your preferred format
             </p>
+          </div>
+
+          <div className="form-group">
+            <label>Select Product (Optional)</label>
+            <select
+              className="form-control"
+              value={formData.product_id}
+              onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
+            >
+              <option value="">No product selected</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name} {product.portfolio ? `- ${product.portfolio}` : ''}
+                </option>
+              ))}
+            </select>
+            {products.length === 0 && (
+              <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
+                No products available. Please add products in Product Management.
+              </p>
+            )}
+          </div>
+
+          <div className="form-group">
+            <label>Select Engagement Type (Optional)</label>
+            <select
+              className="form-control"
+              value={formData.engagement_type_id}
+              onChange={(e) => setFormData({ ...formData, engagement_type_id: e.target.value })}
+            >
+              <option value="">No engagement type selected</option>
+              {engagementTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name} {type.category ? `- ${type.category}` : ''}
+                </option>
+              ))}
+            </select>
+            {engagementTypes.length === 0 && (
+              <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
+                No engagement types available. Please add engagement types in Engagement Type Management.
+              </p>
+            )}
           </div>
 
           <div className="form-group">

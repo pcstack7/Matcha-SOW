@@ -651,7 +651,7 @@ app.get("/api/sows/account/:accountId", isAuthenticated, (req, res) => {
 // Generate SOW using AI
 app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
   try {
-    const { account_id, template_id, project_notes, deliverables } = req.body;
+    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables } = req.body;
 
     if (!account_id || !project_notes || !deliverables) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -663,12 +663,16 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
       return res.status(404).json({ error: "Account not found" });
     }
 
-    // Get template if provided
+    // Get template if provided (for content reference and name)
     let templateContent = "";
+    let templateName = "";
     if (template_id) {
       const template = templateOps.getById(template_id);
-      if (template && template.content) {
-        templateContent = `\n\nUse this template as a reference:\n${template.content}`;
+      if (template) {
+        templateName = template.name;
+        if (template.content) {
+          templateContent = `\n\nUse this template as a reference:\n${template.content}`;
+        }
       }
     }
 
@@ -678,7 +682,7 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
 Account: ${account.name}${account.account_contact ? ` (Contact: ${account.account_contact})` : ""}
 Email: ${account.email || "N/A"}
 Phone: ${account.phone || "N/A"}
-Notes: ${account.notes || "N/A"}
+Notes: ${account.notes || "N/A"}${templateName ? `\nTemplate: ${templateName}` : ""}
 
 Project Notes:
 ${project_notes}
@@ -718,13 +722,16 @@ Format the output as a well-structured document with clear section headers and s
     const data = await response.json();
     const content = data?.output?.[0]?.content?.[0]?.text || "No response generated.";
 
-    // Save SOW to database
+    // Save SOW to database with user tracking
     const id = sowOps.create({
       account_id,
       template_id: template_id || null,
+      product_id: product_id || null,
+      engagement_type_id: engagement_type_id || null,
       project_notes,
       deliverables,
       content,
+      created_by: req.user.id, // Current authenticated user
     });
 
     const sow = sowOps.getById(id);

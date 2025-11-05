@@ -107,12 +107,18 @@ function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL,
       template_id INTEGER,
+      product_id INTEGER,
+      engagement_type_id INTEGER,
       project_notes TEXT NOT NULL,
       deliverables TEXT NOT NULL,
       content TEXT NOT NULL,
+      created_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
-      FOREIGN KEY (template_id) REFERENCES templates (id) ON DELETE SET NULL
+      FOREIGN KEY (template_id) REFERENCES templates (id) ON DELETE SET NULL,
+      FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL,
+      FOREIGN KEY (engagement_type_id) REFERENCES engagement_types (id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
     )
   `);
 
@@ -290,11 +296,20 @@ export const templateOps = {
 export const sowOps = {
   getAll: () => {
     const stmt = db.prepare(`
-      SELECT s.*, a.name as account_name, a.account_contact as account_contact,
-             t.name as template_name
+      SELECT s.*,
+             a.name as account_name,
+             a.account_contact as account_contact,
+             t.name as template_name,
+             p.name as product_name,
+             et.name as engagement_type_name,
+             u.username as created_by_username,
+             u.display_name as created_by_display_name
       FROM sows s
       JOIN accounts a ON s.account_id = a.id
       LEFT JOIN templates t ON s.template_id = t.id
+      LEFT JOIN products p ON s.product_id = p.id
+      LEFT JOIN engagement_types et ON s.engagement_type_id = et.id
+      LEFT JOIN users u ON s.created_by = u.id
       ORDER BY s.created_at DESC
     `);
     return stmt.all();
@@ -302,11 +317,20 @@ export const sowOps = {
 
   getById: (id) => {
     const stmt = db.prepare(`
-      SELECT s.*, a.name as account_name, a.account_contact as account_contact,
-             t.name as template_name
+      SELECT s.*,
+             a.name as account_name,
+             a.account_contact as account_contact,
+             t.name as template_name,
+             p.name as product_name,
+             et.name as engagement_type_name,
+             u.username as created_by_username,
+             u.display_name as created_by_display_name
       FROM sows s
       JOIN accounts a ON s.account_id = a.id
       LEFT JOIN templates t ON s.template_id = t.id
+      LEFT JOIN products p ON s.product_id = p.id
+      LEFT JOIN engagement_types et ON s.engagement_type_id = et.id
+      LEFT JOIN users u ON s.created_by = u.id
       WHERE s.id = ?
     `);
     return stmt.get(id);
@@ -325,15 +349,18 @@ export const sowOps = {
 
   create: (sow) => {
     const stmt = db.prepare(`
-      INSERT INTO sows (account_id, template_id, project_notes, deliverables, content)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO sows (account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, content, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       sow.account_id,
       sow.template_id || null,
+      sow.product_id || null,
+      sow.engagement_type_id || null,
       sow.project_notes,
       sow.deliverables,
-      sow.content
+      sow.content,
+      sow.created_by || null
     );
     return result.lastInsertRowid;
   },
