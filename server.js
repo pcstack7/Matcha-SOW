@@ -73,6 +73,13 @@ const upload = multer({
   },
 });
 
+// Ensure upload directory exists
+const uploadDir = path.join(__dirname, 'uploads', 'templates');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log('✓ Created directory: uploads/templates');
+}
+
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.MATCHA_API_KEY;
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 2010;
