@@ -955,7 +955,7 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
       // Check if line is a subheader
       else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
         const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
+        doc.font('Helvetica-Bold').fontSize(14).fillColor("#383392").text(subHeaderText);
         doc.moveDown(0.3);
       }
       // Check if line is a bullet point but NOT if content is all bold
@@ -965,12 +965,12 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
         // If the content after the bullet is entirely bold, treat as subheader
         if (bulletContent.match(/^\*\*.*\*\*$/)) {
           const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
-          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text(subHeaderText);
+          doc.font('Helvetica-Bold').fontSize(14).fillColor("#383392").text(subHeaderText);
           doc.moveDown(0.3);
         } else {
           // Regular bullet point
           const currentY = doc.y;
-          doc.font('Helvetica-Bold').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
+          doc.font('Helvetica').fontSize(9.5).fillColor("#5E63CD").text('•', 60, currentY, { continued: false });
           doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
           renderTextWithBold(bulletContent, doc, { indent: 30, lineGap: 2 });
         }
@@ -1152,8 +1152,8 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                 text: subHeaderText,
                 bold: true,
                 font: "Verdana",
-                size: 19, // 9.5pt = 19 half-points
-                color: "5E63CD",
+                size: 28, // 14pt = 28 half-points
+                color: "383392",
               }),
             ],
             spacing: { before: 150, after: 75 },
@@ -1174,8 +1174,8 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                   text: subHeaderText,
                   bold: true,
                   font: "Verdana",
-                  size: 19, // 9.5pt = 19 half-points
-                  color: "5E63CD",
+                  size: 28, // 14pt = 28 half-points
+                  color: "383392",
                 }),
               ],
               spacing: { before: 150, after: 75 },
@@ -1191,7 +1191,6 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
                   font: "Verdana",
                   size: 19, // 9.5pt = 19 half-points
                   color: "5E63CD",
-                  bold: true,
                 }),
                 ...parseInlineMarkdownForDocx(bulletContent),
               ],

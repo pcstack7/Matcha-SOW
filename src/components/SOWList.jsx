@@ -175,8 +175,8 @@ function formatSOWContent(content) {
           key={i}
           style={{
             fontFamily: 'Verdana, sans-serif',
-            fontSize: '9.5px',
-            color: '#5E63CD',
+            fontSize: '14px',
+            color: '#383392',
             fontWeight: 'bold',
             marginTop: '12px',
             marginBottom: '6px',
@@ -201,8 +201,8 @@ function formatSOWContent(content) {
             key={i}
             style={{
               fontFamily: 'Verdana, sans-serif',
-              fontSize: '9.5px',
-              color: '#5E63CD',
+              fontSize: '14px',
+              color: '#383392',
               fontWeight: 'bold',
               marginTop: '12px',
               marginBottom: '6px',
@@ -229,7 +229,7 @@ function formatSOWContent(content) {
             marginBottom: '4px',
           }}
         >
-          <span style={{ color: '#5E63CD', fontWeight: 'bold', fontSize: '9.5px' }}>•&nbsp;&nbsp;</span>
+          <span style={{ color: '#5E63CD', fontSize: '9.5px' }}>•&nbsp;&nbsp;</span>
           {parseInlineMarkdown(bulletContent)}
         </div>
       );
