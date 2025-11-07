@@ -25,7 +25,7 @@ function UserManagement() {
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/users');
+      const response = await fetch('/api/users', { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch users');
@@ -86,6 +86,7 @@ function UserManagement() {
         // Update existing user
         const response = await fetch(`/api/users/${editingUser.id}`, {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -111,6 +112,7 @@ function UserManagement() {
 
         const response = await fetch('/api/users', {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -144,6 +146,7 @@ function UserManagement() {
     try {
       const response = await fetch(`/api/users/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -174,6 +177,7 @@ function UserManagement() {
     try {
       const response = await fetch(`/api/users/${passwordUserId}/password`, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },

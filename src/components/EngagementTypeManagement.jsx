@@ -21,7 +21,7 @@ function EngagementTypeManagement({ userRole }) {
   const loadEngagementTypes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/engagement-types');
+      const response = await fetch('/api/engagement-types', { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch engagement types');
@@ -73,6 +73,7 @@ function EngagementTypeManagement({ userRole }) {
         // Update existing engagement type
         const response = await fetch(`/api/engagement-types/${editingType.id}`, {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -87,6 +88,7 @@ function EngagementTypeManagement({ userRole }) {
         // Create new engagement type
         const response = await fetch('/api/engagement-types', {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -113,6 +115,7 @@ function EngagementTypeManagement({ userRole }) {
     try {
       const response = await fetch(`/api/engagement-types/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
 
       if (!response.ok) {
