@@ -285,8 +285,8 @@ function SOWGenerator() {
       const [accountsData, templatesData, productsData, engagementTypesData] = await Promise.all([
         accountApi.getAll(),
         templateApi.getAll(),
-        fetch('/api/products').then(res => res.json()),
-        fetch('/api/engagement-types').then(res => res.json()),
+        fetch('/api/products', { credentials: 'include' }).then(res => res.json()),
+        fetch('/api/engagement-types', { credentials: 'include' }).then(res => res.json()),
       ]);
       setAccounts(accountsData);
       setTemplates(templatesData);

@@ -18,6 +18,10 @@ import { initializeDefaultAdmin } from "./auth/init-admin.js";
 dotenv.config();
 
 const app = express();
+
+// Trust proxy - required when running behind Caddy/nginx reverse proxy
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -38,6 +42,7 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
+      sameSite: 'lax', // Required for cross-site cookie handling
     },
   })
 );

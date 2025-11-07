@@ -39,6 +39,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
     try {
       const response = await fetch('/auth/register', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -59,6 +60,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
       // Registration successful - now log in
       const loginResponse = await fetch('/auth/login', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },

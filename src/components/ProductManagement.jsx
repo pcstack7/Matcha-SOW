@@ -21,7 +21,7 @@ function ProductManagement({ userRole }) {
   const loadProducts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/products');
+      const response = await fetch('/api/products', { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch products');
@@ -73,6 +73,7 @@ function ProductManagement({ userRole }) {
         // Update existing product
         const response = await fetch(`/api/products/${editingProduct.id}`, {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -87,6 +88,7 @@ function ProductManagement({ userRole }) {
         // Create new product
         const response = await fetch('/api/products', {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -113,6 +115,7 @@ function ProductManagement({ userRole }) {
     try {
       const response = await fetch(`/api/products/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
 
       if (!response.ok) {

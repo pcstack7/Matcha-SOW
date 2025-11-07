@@ -1,21 +1,32 @@
 const API_BASE = '/api';
 
+// Helper function to make authenticated fetch calls
+const fetchWithAuth = (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    credentials: 'include', // Required for session cookies
+    headers: {
+      ...options.headers,
+    },
+  });
+};
+
 // Account API
 export const accountApi = {
   getAll: async () => {
-    const response = await fetch(`${API_BASE}/accounts`);
+    const response = await fetchWithAuth(`${API_BASE}/accounts`);
     if (!response.ok) throw new Error('Failed to fetch accounts');
     return response.json();
   },
 
   getById: async (id) => {
-    const response = await fetch(`${API_BASE}/accounts/${id}`);
+    const response = await fetchWithAuth(`${API_BASE}/accounts/${id}`);
     if (!response.ok) throw new Error('Failed to fetch account');
     return response.json();
   },
 
   create: async (account) => {
-    const response = await fetch(`${API_BASE}/accounts`, {
+    const response = await fetchWithAuth(`${API_BASE}/accounts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(account),
@@ -25,7 +36,7 @@ export const accountApi = {
   },
 
   update: async (id, account) => {
-    const response = await fetch(`${API_BASE}/accounts/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/accounts/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(account),
@@ -35,7 +46,7 @@ export const accountApi = {
   },
 
   delete: async (id) => {
-    const response = await fetch(`${API_BASE}/accounts/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/accounts/${id}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete account');
@@ -46,7 +57,7 @@ export const accountApi = {
 // Template API
 export const templateApi = {
   getAll: async () => {
-    const response = await fetch(`${API_BASE}/templates`);
+    const response = await fetchWithAuth(`${API_BASE}/templates`);
     if (!response.ok) throw new Error('Failed to fetch templates');
     return response.json();
   },
@@ -56,7 +67,7 @@ export const templateApi = {
     formData.append('file', file);
     if (name) formData.append('name', name);
 
-    const response = await fetch(`${API_BASE}/templates`, {
+    const response = await fetchWithAuth(`${API_BASE}/templates`, {
       method: 'POST',
       body: formData,
     });
@@ -65,7 +76,7 @@ export const templateApi = {
   },
 
   delete: async (id) => {
-    const response = await fetch(`${API_BASE}/templates/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/templates/${id}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete template');
@@ -76,25 +87,25 @@ export const templateApi = {
 // SOW API
 export const sowApi = {
   getAll: async () => {
-    const response = await fetch(`${API_BASE}/sows`);
+    const response = await fetchWithAuth(`${API_BASE}/sows`);
     if (!response.ok) throw new Error('Failed to fetch SOWs');
     return response.json();
   },
 
   getById: async (id) => {
-    const response = await fetch(`${API_BASE}/sows/${id}`);
+    const response = await fetchWithAuth(`${API_BASE}/sows/${id}`);
     if (!response.ok) throw new Error('Failed to fetch SOW');
     return response.json();
   },
 
   getByAccountId: async (accountId) => {
-    const response = await fetch(`${API_BASE}/sows/account/${accountId}`);
+    const response = await fetchWithAuth(`${API_BASE}/sows/account/${accountId}`);
     if (!response.ok) throw new Error('Failed to fetch SOWs');
     return response.json();
   },
 
   generate: async (data) => {
-    const response = await fetch(`${API_BASE}/sows/generate`, {
+    const response = await fetchWithAuth(`${API_BASE}/sows/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -104,7 +115,7 @@ export const sowApi = {
   },
 
   delete: async (id) => {
-    const response = await fetch(`${API_BASE}/sows/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/sows/${id}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete SOW');
@@ -114,15 +125,45 @@ export const sowApi = {
 
 // Export API
 export const exportApi = {
-  downloadPdf: (id) => {
-    window.open(`${API_BASE}/export/${id}/pdf`, '_blank');
+  downloadPdf: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/export/${id}/pdf`);
+    if (!response.ok) throw new Error('Failed to download PDF');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SOW-${id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
 
-  downloadDocx: (id) => {
-    window.open(`${API_BASE}/export/${id}/docx`, '_blank');
+  downloadDocx: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/export/${id}/docx`);
+    if (!response.ok) throw new Error('Failed to download DOCX');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SOW-${id}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
 
-  downloadTxt: (id) => {
-    window.open(`${API_BASE}/export/${id}/txt`, '_blank');
+  downloadTxt: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/export/${id}/txt`);
+    if (!response.ok) throw new Error('Failed to download TXT');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SOW-${id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
 };

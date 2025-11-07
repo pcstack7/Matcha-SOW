@@ -23,7 +23,7 @@ function AccountManagement({ userRole }) {
   const loadAccounts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/accounts');
+      const response = await fetch('/api/accounts', { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch accounts');
@@ -75,6 +75,7 @@ function AccountManagement({ userRole }) {
         // Update existing account
         const response = await fetch(`/api/accounts/${editingAccount.id}`, {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -89,6 +90,7 @@ function AccountManagement({ userRole }) {
         // Create new account
         const response = await fetch('/api/accounts', {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -115,6 +117,7 @@ function AccountManagement({ userRole }) {
     try {
       const response = await fetch(`/api/accounts/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
 
       if (!response.ok) {
