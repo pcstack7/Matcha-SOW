@@ -23,7 +23,7 @@ function App() {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch('/auth/session');
+      const response = await fetch('/auth/session', { credentials: 'include' });
       const data = await response.json();
 
       if (data.authenticated && data.user) {
@@ -50,7 +50,7 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/auth/logout', { method: 'POST' });
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
       setUser(null);
       setIsAuthenticated(false);
       setActiveView('generate');
