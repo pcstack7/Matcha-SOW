@@ -10,7 +10,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps } from "./database.js";
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -78,6 +78,33 @@ const upload = multer({
   },
 });
 
+// Configure multer for SOW Knowledge Bank uploads
+const sowStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/sow-bank");
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+
+const sowUpload = multer({
+  storage: sowStorage,
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [".pdf", ".docx"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Only PDF and DOCX are allowed for SOW uploads."));
+    }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+});
+
 // Ensure upload directory exists
 const uploadDir = path.join(__dirname, 'uploads', 'templates');
 if (!fs.existsSync(uploadDir)) {
@@ -90,10 +117,18 @@ const API_KEY = process.env.MATCHA_API_KEY;
 const WORKSPACE_ID = process.env.WORKSPACE_ID || 2010;
 const BASE_URL = process.env.BASE_URL || "https://matcha.harriscomputer.com/rest/api/v1";
 const MISSION_ID = process.env.MISSION_ID || 7618;
+const FOLDER_ID = process.env.FOLDER_ID || 10917; // Matcha folder for SOW uploads
 
 if (!API_KEY) {
   console.error("❌ MATCHA_API_KEY is missing in .env file.");
   process.exit(1);
+}
+
+// Ensure upload directory for SOW Knowledge Bank files exists
+const sowUploadDir = path.join(__dirname, 'uploads', 'sow-bank');
+if (!fs.existsSync(sowUploadDir)) {
+  fs.mkdirSync(sowUploadDir, { recursive: true });
+  console.log('✓ Created directory: uploads/sow-bank');
 }
 
 // ============================================
@@ -477,6 +512,198 @@ app.delete("/api/engagement-types/:id", requireAdmin, (req, res) => {
   } catch (err) {
     console.error("Error deleting engagement type:", err);
     res.status(500).json({ error: "Failed to delete engagement type" });
+  }
+});
+
+// ============================================
+// SOW KNOWLEDGE BANK ENDPOINTS
+// ============================================
+
+// Get all uploaded SOWs
+app.get("/api/uploaded-sows", isAuthenticated, (req, res) => {
+  try {
+    const filter = req.query.filter || 'active'; // Default to active
+    const uploadedSOWs = uploadedSOWOps.getAll(filter);
+    res.json(uploadedSOWs);
+  } catch (err) {
+    console.error("Error fetching uploaded SOWs:", err);
+    res.status(500).json({ error: "Failed to fetch uploaded SOWs" });
+  }
+});
+
+// Get uploaded SOW by ID
+app.get("/api/uploaded-sows/:id", isAuthenticated, (req, res) => {
+  try {
+    const uploadedSOW = uploadedSOWOps.getById(req.params.id);
+    if (!uploadedSOW) {
+      return res.status(404).json({ error: "Uploaded SOW not found" });
+    }
+    res.json(uploadedSOW);
+  } catch (err) {
+    console.error("Error fetching uploaded SOW:", err);
+    res.status(500).json({ error: "Failed to fetch uploaded SOW" });
+  }
+});
+
+// Upload SOW to Knowledge Bank and Matcha
+app.post("/api/uploaded-sows", isAuthenticated, sowUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const {
+      account_id,
+      product_id,
+      engagement_type_id,
+      description,
+      pricing,
+      currency,
+      pm_hours,
+      ic_hours,
+      sa_hours,
+      se_hours,
+      trainer_hours,
+      integration_hours,
+      apac_testing_hours,
+      apac_rd_hours
+    } = req.body;
+
+    if (!account_id) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Account is required" });
+    }
+
+    // Upload file to Matcha
+    let matchaFileId = null;
+    try {
+      const FormData = (await import('form-data')).default;
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(req.file.path));
+
+      const matchaResponse = await fetch(`${BASE_URL}/file?folder_id=${FOLDER_ID}`, {
+        method: 'POST',
+        headers: {
+          'MATCHA-API-KEY': API_KEY,
+          'Accept': 'application/json',
+        },
+        body: formData,
+      });
+
+      if (matchaResponse.ok) {
+        const matchaData = await matchaResponse.json();
+        matchaFileId = matchaData.id || matchaData.file_id;
+        console.log(`✓ File uploaded to Matcha with ID: ${matchaFileId}`);
+      } else {
+        console.warn(`⚠ Failed to upload to Matcha: ${matchaResponse.statusText}`);
+      }
+    } catch (matchaErr) {
+      console.error("Error uploading to Matcha:", matchaErr);
+      // Continue even if Matcha upload fails
+    }
+
+    // Save to database
+    const id = uploadedSOWOps.create({
+      account_id: parseInt(account_id),
+      product_id: product_id ? parseInt(product_id) : null,
+      engagement_type_id: engagement_type_id ? parseInt(engagement_type_id) : null,
+      description: description || null,
+      file_name: req.file.originalname,
+      file_path: req.file.path,
+      matcha_file_id: matchaFileId,
+      pricing: pricing ? parseFloat(pricing) : null,
+      currency: currency || 'USD',
+      pm_hours: pm_hours ? parseFloat(pm_hours) : null,
+      ic_hours: ic_hours ? parseFloat(ic_hours) : null,
+      sa_hours: sa_hours ? parseFloat(sa_hours) : null,
+      se_hours: se_hours ? parseFloat(se_hours) : null,
+      trainer_hours: trainer_hours ? parseFloat(trainer_hours) : null,
+      integration_hours: integration_hours ? parseFloat(integration_hours) : null,
+      apac_testing_hours: apac_testing_hours ? parseFloat(apac_testing_hours) : null,
+      apac_rd_hours: apac_rd_hours ? parseFloat(apac_rd_hours) : null,
+      created_by: req.user.id,
+    });
+
+    res.json({
+      message: "SOW uploaded successfully",
+      id,
+      matcha_file_id: matchaFileId,
+    });
+  } catch (err) {
+    console.error("Error uploading SOW:", err);
+    // Clean up file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: "Failed to upload SOW" });
+  }
+});
+
+// Update uploaded SOW metadata (not the file)
+app.put("/api/uploaded-sows/:id", isAuthenticated, (req, res) => {
+  try {
+    const {
+      account_id,
+      product_id,
+      engagement_type_id,
+      description,
+      pricing,
+      currency,
+      pm_hours,
+      ic_hours,
+      sa_hours,
+      se_hours,
+      trainer_hours,
+      integration_hours,
+      apac_testing_hours,
+      apac_rd_hours
+    } = req.body;
+
+    uploadedSOWOps.update(req.params.id, {
+      account_id: parseInt(account_id),
+      product_id: product_id ? parseInt(product_id) : null,
+      engagement_type_id: engagement_type_id ? parseInt(engagement_type_id) : null,
+      description: description || null,
+      pricing: pricing ? parseFloat(pricing) : null,
+      currency: currency || 'USD',
+      pm_hours: pm_hours ? parseFloat(pm_hours) : null,
+      ic_hours: ic_hours ? parseFloat(ic_hours) : null,
+      sa_hours: sa_hours ? parseFloat(sa_hours) : null,
+      se_hours: se_hours ? parseFloat(se_hours) : null,
+      trainer_hours: trainer_hours ? parseFloat(trainer_hours) : null,
+      integration_hours: integration_hours ? parseFloat(integration_hours) : null,
+      apac_testing_hours: apac_testing_hours ? parseFloat(apac_testing_hours) : null,
+      apac_rd_hours: apac_rd_hours ? parseFloat(apac_rd_hours) : null,
+      updated_by: req.user.id,
+    });
+
+    res.json({ message: "Uploaded SOW updated successfully" });
+  } catch (err) {
+    console.error("Error updating uploaded SOW:", err);
+    res.status(500).json({ error: "Failed to update uploaded SOW" });
+  }
+});
+
+// Deactivate uploaded SOW (soft delete)
+app.put("/api/uploaded-sows/:id/deactivate", isAuthenticated, (req, res) => {
+  try {
+    uploadedSOWOps.deactivate(req.params.id, req.user.id);
+    res.json({ message: "Uploaded SOW deactivated successfully" });
+  } catch (err) {
+    console.error("Error deactivating uploaded SOW:", err);
+    res.status(500).json({ error: "Failed to deactivate uploaded SOW" });
+  }
+});
+
+// Reactivate uploaded SOW
+app.put("/api/uploaded-sows/:id/reactivate", isAuthenticated, (req, res) => {
+  try {
+    uploadedSOWOps.reactivate(req.params.id, req.user.id);
+    res.json({ message: "Uploaded SOW reactivated successfully" });
+  } catch (err) {
+    console.error("Error reactivating uploaded SOW:", err);
+    res.status(500).json({ error: "Failed to reactivate uploaded SOW" });
   }
 });
 
@@ -1316,6 +1543,40 @@ app.get("/api/export/:id/txt", isAuthenticated, (req, res) => {
 });
 
 // ============================================
+// DASHBOARD ANALYTICS ENDPOINT
+// ============================================
+
+// Get dashboard analytics data
+app.get("/api/dashboard", isAuthenticated, (req, res) => {
+  try {
+    const counts = dashboardOps.getCounts();
+    const pricingSummary = dashboardOps.getPricingSummary();
+    const pricingByAccount = dashboardOps.getPricingByAccount();
+    const pricingByProduct = dashboardOps.getPricingByProduct();
+    const pricingByUser = dashboardOps.getPricingByUser();
+    const resourceHours = dashboardOps.getResourceHoursBreakdown();
+    const topAccounts = dashboardOps.getTopAccountsBySowCount(10);
+    const timeline = dashboardOps.getSowTimeline();
+    const engagementTypes = dashboardOps.getEngagementTypeDistribution();
+
+    res.json({
+      counts,
+      pricingSummary,
+      pricingByAccount,
+      pricingByProduct,
+      pricingByUser,
+      resourceHours,
+      topAccounts,
+      timeline,
+      engagementTypes,
+    });
+  } catch (err) {
+    console.error("Error fetching dashboard data:", err);
+    res.status(500).json({ error: "Failed to fetch dashboard data" });
+  }
+});
+
+// ============================================
 // LEGACY CHAT ENDPOINT (preserved)
 // ============================================
 
@@ -1359,7 +1620,7 @@ app.post("/chat", async (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // Fallback to index.html for client-side routing
-app.get("*", (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 

@@ -6,6 +6,8 @@ import TemplateManagement from './components/TemplateManagement';
 import SOWGenerator from './components/SOWGenerator';
 import SOWList from './components/SOWList';
 import UserManagement from './components/UserManagement';
+import UploadedSOWManagement from './components/UploadedSOWManagement';
+import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -61,10 +63,14 @@ function App() {
 
   const renderContent = () => {
     switch (activeView) {
+      case 'dashboard':
+        return <Dashboard />;
       case 'generate':
         return <SOWGenerator />;
       case 'history':
         return <SOWList />;
+      case 'sow-bank':
+        return <UploadedSOWManagement userRole={user?.role} />;
       case 'accounts':
         return <AccountManagement userRole={user?.role} />;
       case 'products':
@@ -122,6 +128,12 @@ function App() {
 
         <nav className="sidebar-nav">
           <div
+            className={`nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveView('dashboard')}
+          >
+            Dashboard
+          </div>
+          <div
             className={`nav-item ${activeView === 'generate' ? 'active' : ''}`}
             onClick={() => setActiveView('generate')}
           >
@@ -132,6 +144,12 @@ function App() {
             onClick={() => setActiveView('history')}
           >
             SOW History
+          </div>
+          <div
+            className={`nav-item ${activeView === 'sow-bank' ? 'active' : ''}`}
+            onClick={() => setActiveView('sow-bank')}
+          >
+            SOW Knowledge Bank
           </div>
           <div
             className={`nav-item ${activeView === 'accounts' ? 'active' : ''}`}

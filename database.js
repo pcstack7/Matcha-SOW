@@ -122,6 +122,40 @@ function initializeDatabase() {
     )
   `);
 
+  // Uploaded SOWs table (for SOW Knowledge Bank)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS uploaded_sows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      product_id INTEGER,
+      engagement_type_id INTEGER,
+      description TEXT,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      matcha_file_id TEXT,
+      pricing REAL,
+      currency TEXT DEFAULT 'USD',
+      pm_hours REAL,
+      ic_hours REAL,
+      sa_hours REAL,
+      se_hours REAL,
+      trainer_hours REAL,
+      integration_hours REAL,
+      apac_testing_hours REAL,
+      apac_rd_hours REAL,
+      created_by INTEGER NOT NULL,
+      updated_by INTEGER,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL,
+      FOREIGN KEY (engagement_type_id) REFERENCES engagement_types (id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
+      FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
   console.log('Database initialized successfully');
 }
 
@@ -459,6 +493,316 @@ export const engagementTypeOps = {
     const stmt = db.prepare('DELETE FROM engagement_types WHERE id = ?');
     stmt.run(id);
   }
+};
+
+// Uploaded SOW operations
+export const uploadedSOWOps = {
+  getAll: (filter = 'active') => {
+    let whereClause = '';
+    if (filter === 'active') {
+      whereClause = 'WHERE us.is_active = 1';
+    } else if (filter === 'inactive') {
+      whereClause = 'WHERE us.is_active = 0';
+    }
+    // if filter === 'all', no WHERE clause needed
+
+    const stmt = db.prepare(`
+      SELECT
+        us.*,
+        a.name as account_name,
+        p.name as product_name,
+        et.name as engagement_type_name,
+        u.username as created_by_username,
+        u.display_name as created_by_display_name,
+        u2.username as updated_by_username,
+        u2.display_name as updated_by_display_name
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      LEFT JOIN products p ON us.product_id = p.id
+      LEFT JOIN engagement_types et ON us.engagement_type_id = et.id
+      LEFT JOIN users u ON us.created_by = u.id
+      LEFT JOIN users u2 ON us.updated_by = u2.id
+      ${whereClause}
+      ORDER BY us.created_at DESC
+    `);
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`
+      SELECT
+        us.*,
+        a.name as account_name,
+        p.name as product_name,
+        et.name as engagement_type_name,
+        u.username as created_by_username,
+        u.display_name as created_by_display_name,
+        u2.username as updated_by_username,
+        u2.display_name as updated_by_display_name
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      LEFT JOIN products p ON us.product_id = p.id
+      LEFT JOIN engagement_types et ON us.engagement_type_id = et.id
+      LEFT JOIN users u ON us.created_by = u.id
+      LEFT JOIN users u2 ON us.updated_by = u2.id
+      WHERE us.id = ?
+    `);
+    return stmt.get(id);
+  },
+
+  create: (uploadedSOW) => {
+    const stmt = db.prepare(`
+      INSERT INTO uploaded_sows (
+        account_id, product_id, engagement_type_id, description, file_name, file_path,
+        matcha_file_id, pricing, currency, pm_hours, ic_hours, sa_hours, se_hours,
+        trainer_hours, integration_hours, apac_testing_hours, apac_rd_hours, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      uploadedSOW.account_id,
+      uploadedSOW.product_id || null,
+      uploadedSOW.engagement_type_id || null,
+      uploadedSOW.description || null,
+      uploadedSOW.file_name,
+      uploadedSOW.file_path,
+      uploadedSOW.matcha_file_id || null,
+      uploadedSOW.pricing || null,
+      uploadedSOW.currency || 'USD',
+      uploadedSOW.pm_hours || null,
+      uploadedSOW.ic_hours || null,
+      uploadedSOW.sa_hours || null,
+      uploadedSOW.se_hours || null,
+      uploadedSOW.trainer_hours || null,
+      uploadedSOW.integration_hours || null,
+      uploadedSOW.apac_testing_hours || null,
+      uploadedSOW.apac_rd_hours || null,
+      uploadedSOW.created_by
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, uploadedSOW) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET account_id = ?, product_id = ?, engagement_type_id = ?, description = ?,
+          pricing = ?, currency = ?, pm_hours = ?, ic_hours = ?, sa_hours = ?, se_hours = ?,
+          trainer_hours = ?, integration_hours = ?, apac_testing_hours = ?, apac_rd_hours = ?,
+          updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(
+      uploadedSOW.account_id,
+      uploadedSOW.product_id || null,
+      uploadedSOW.engagement_type_id || null,
+      uploadedSOW.description || null,
+      uploadedSOW.pricing || null,
+      uploadedSOW.currency || 'USD',
+      uploadedSOW.pm_hours || null,
+      uploadedSOW.ic_hours || null,
+      uploadedSOW.sa_hours || null,
+      uploadedSOW.se_hours || null,
+      uploadedSOW.trainer_hours || null,
+      uploadedSOW.integration_hours || null,
+      uploadedSOW.apac_testing_hours || null,
+      uploadedSOW.apac_rd_hours || null,
+      uploadedSOW.updated_by,
+      id
+    );
+  },
+
+  deactivate: (id, userId) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET is_active = 0, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(userId, id);
+  },
+
+  reactivate: (id, userId) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET is_active = 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(userId, id);
+  },
+
+  // Note: No delete operation - only deactivation/reactivation allowed
+};
+
+// Dashboard analytics operations
+export const dashboardOps = {
+  // Get total counts
+  getCounts: () => {
+    const stmt = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM sows) as total_generated_sows,
+        (SELECT COUNT(*) FROM uploaded_sows WHERE is_active = 1) as total_uploaded_sows,
+        (SELECT COUNT(*) FROM accounts) as total_accounts,
+        (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_users
+    `);
+    return stmt.get();
+  },
+
+  // Get pricing summary
+  getPricingSummary: () => {
+    const stmt = db.prepare(`
+      SELECT
+        currency,
+        COUNT(*) as count,
+        SUM(pricing) as total,
+        AVG(pricing) as average,
+        MIN(pricing) as minimum,
+        MAX(pricing) as maximum
+      FROM uploaded_sows
+      WHERE is_active = 1 AND pricing IS NOT NULL
+      GROUP BY currency
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by account
+  getPricingByAccount: () => {
+    const stmt = db.prepare(`
+      SELECT
+        a.name as account_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY a.id, us.currency
+      ORDER BY total_pricing DESC
+      LIMIT 10
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by product
+  getPricingByProduct: () => {
+    const stmt = db.prepare(`
+      SELECT
+        p.name as product_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN products p ON us.product_id = p.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY p.id, us.currency
+      ORDER BY total_pricing DESC
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by user
+  getPricingByUser: () => {
+    const stmt = db.prepare(`
+      SELECT
+        u.display_name as user_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN users u ON us.created_by = u.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY u.id, us.currency
+      ORDER BY total_pricing DESC
+    `);
+    return stmt.all();
+  },
+
+  // Get resource hours breakdown
+  getResourceHoursBreakdown: () => {
+    const stmt = db.prepare(`
+      SELECT
+        SUM(pm_hours) as pm_hours,
+        SUM(ic_hours) as ic_hours,
+        SUM(sa_hours) as sa_hours,
+        SUM(se_hours) as se_hours,
+        SUM(trainer_hours) as trainer_hours,
+        SUM(integration_hours) as integration_hours,
+        SUM(apac_testing_hours) as apac_testing_hours,
+        SUM(apac_rd_hours) as apac_rd_hours
+      FROM uploaded_sows
+      WHERE is_active = 1
+    `);
+    return stmt.get();
+  },
+
+  // Get top accounts by SOW count
+  getTopAccountsBySowCount: (limit = 10) => {
+    const stmt = db.prepare(`
+      SELECT
+        a.name as account_name,
+        COUNT(us.id) as sow_count,
+        COUNT(CASE WHEN us.is_active = 1 THEN 1 END) as active_count
+      FROM accounts a
+      LEFT JOIN uploaded_sows us ON a.id = us.account_id
+      GROUP BY a.id
+      ORDER BY sow_count DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit);
+  },
+
+  // Get SOW creation timeline (last 12 months)
+  getSowTimeline: () => {
+    const stmt = db.prepare(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as generated_count
+      FROM sows
+      WHERE created_at >= date('now', '-12 months')
+      GROUP BY month
+      ORDER BY month
+    `);
+    const generated = stmt.all();
+
+    const uploadStmt = db.prepare(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as uploaded_count
+      FROM uploaded_sows
+      WHERE created_at >= date('now', '-12 months') AND is_active = 1
+      GROUP BY month
+      ORDER BY month
+    `);
+    const uploaded = uploadStmt.all();
+
+    // Merge the two datasets
+    const timeline = {};
+    generated.forEach(item => {
+      timeline[item.month] = { month: item.month, generated: item.generated_count, uploaded: 0 };
+    });
+    uploaded.forEach(item => {
+      if (timeline[item.month]) {
+        timeline[item.month].uploaded = item.uploaded_count;
+      } else {
+        timeline[item.month] = { month: item.month, generated: 0, uploaded: item.uploaded_count };
+      }
+    });
+
+    return Object.values(timeline).sort((a, b) => a.month.localeCompare(b.month));
+  },
+
+  // Get engagement type distribution
+  getEngagementTypeDistribution: () => {
+    const stmt = db.prepare(`
+      SELECT
+        et.name as engagement_type,
+        COUNT(us.id) as count
+      FROM uploaded_sows us
+      JOIN engagement_types et ON us.engagement_type_id = et.id
+      WHERE us.is_active = 1
+      GROUP BY et.id
+      ORDER BY count DESC
+    `);
+    return stmt.all();
+  },
 };
 
 export default db;
