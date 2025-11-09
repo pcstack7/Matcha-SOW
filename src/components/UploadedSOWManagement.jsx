@@ -10,6 +10,7 @@ function UploadedSOWManagement({ userRole }) {
   const [showModal, setShowModal] = useState(false);
   const [editingSOW, setEditingSOW] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [filter, setFilter] = useState('active');
 
   const [formData, setFormData] = useState({
     account_id: '',
@@ -32,13 +33,13 @@ function UploadedSOWManagement({ userRole }) {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [filter]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       const [sowsData, accountsData, productsData, typesData] = await Promise.all([
-        fetch('/api/uploaded-sows', { credentials: 'include' }).then(res => res.json()),
+        fetch(`/api/uploaded-sows?filter=${filter}`, { credentials: 'include' }).then(res => res.json()),
         fetch('/api/accounts', { credentials: 'include' }).then(res => res.json()),
         fetch('/api/products', { credentials: 'include' }).then(res => res.json()),
         fetch('/api/engagement-types', { credentials: 'include' }).then(res => res.json()),
@@ -221,6 +222,28 @@ function UploadedSOWManagement({ userRole }) {
     }
   };
 
+  const handleReactivate = async (id) => {
+    if (!window.confirm('Are you sure you want to reactivate this SOW?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/uploaded-sows/${id}/reactivate`, {
+        method: 'PUT',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to reactivate SOW');
+      }
+
+      loadData();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -267,9 +290,25 @@ function UploadedSOWManagement({ userRole }) {
       <div className="header">
         <div className="header-content">
           <h1>SOW Knowledge Bank</h1>
-          <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-            + Upload SOW
-          </button>
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <label htmlFor="filter-select" style={{ fontSize: '14px', color: '#5E63CD' }}>Filter:</label>
+              <select
+                id="filter-select"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="form-control"
+                style={{ width: 'auto', minWidth: '120px' }}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <button className="btn btn-primary" onClick={() => handleOpenModal()}>
+              + Upload SOW
+            </button>
+          </div>
         </div>
       </div>
 
@@ -297,6 +336,7 @@ function UploadedSOWManagement({ userRole }) {
                 <th>Total Hours</th>
                 <th>Uploaded By</th>
                 <th>Date</th>
+                <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -312,21 +352,40 @@ function UploadedSOWManagement({ userRole }) {
                   <td>{sow.created_by_display_name || sow.created_by_username}</td>
                   <td>{formatDate(sow.created_at)}</td>
                   <td>
-                    <button
-                      className="btn btn-sm btn-secondary"
-                      onClick={() => handleOpenModal(sow)}
-                      title="Edit"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="btn btn-sm btn-danger"
-                      onClick={() => handleDeactivate(sow.id)}
-                      title="Deactivate"
-                      style={{ marginLeft: '5px' }}
-                    >
-                      Deactivate
-                    </button>
+                    <span style={{
+                      color: sow.is_active ? '#28a745' : '#6c757d',
+                      fontWeight: '500'
+                    }}>
+                      {sow.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="action-buttons">
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => handleOpenModal(sow)}
+                        title="Edit"
+                      >
+                        Edit
+                      </button>
+                      {sow.is_active ? (
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => handleDeactivate(sow.id)}
+                          title="Deactivate"
+                        >
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-sm btn-success"
+                          onClick={() => handleReactivate(sow.id)}
+                          title="Reactivate"
+                        >
+                          Reactivate
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

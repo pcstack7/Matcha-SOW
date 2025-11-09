@@ -522,7 +522,8 @@ app.delete("/api/engagement-types/:id", requireAdmin, (req, res) => {
 // Get all uploaded SOWs
 app.get("/api/uploaded-sows", isAuthenticated, (req, res) => {
   try {
-    const uploadedSOWs = uploadedSOWOps.getAll();
+    const filter = req.query.filter || 'active'; // Default to active
+    const uploadedSOWs = uploadedSOWOps.getAll(filter);
     res.json(uploadedSOWs);
   } catch (err) {
     console.error("Error fetching uploaded SOWs:", err);
@@ -692,6 +693,17 @@ app.put("/api/uploaded-sows/:id/deactivate", isAuthenticated, (req, res) => {
   } catch (err) {
     console.error("Error deactivating uploaded SOW:", err);
     res.status(500).json({ error: "Failed to deactivate uploaded SOW" });
+  }
+});
+
+// Reactivate uploaded SOW
+app.put("/api/uploaded-sows/:id/reactivate", isAuthenticated, (req, res) => {
+  try {
+    uploadedSOWOps.reactivate(req.params.id, req.user.id);
+    res.json({ message: "Uploaded SOW reactivated successfully" });
+  } catch (err) {
+    console.error("Error reactivating uploaded SOW:", err);
+    res.status(500).json({ error: "Failed to reactivate uploaded SOW" });
   }
 });
 

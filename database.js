@@ -497,7 +497,15 @@ export const engagementTypeOps = {
 
 // Uploaded SOW operations
 export const uploadedSOWOps = {
-  getAll: () => {
+  getAll: (filter = 'active') => {
+    let whereClause = '';
+    if (filter === 'active') {
+      whereClause = 'WHERE us.is_active = 1';
+    } else if (filter === 'inactive') {
+      whereClause = 'WHERE us.is_active = 0';
+    }
+    // if filter === 'all', no WHERE clause needed
+
     const stmt = db.prepare(`
       SELECT
         us.*,
@@ -514,7 +522,7 @@ export const uploadedSOWOps = {
       LEFT JOIN engagement_types et ON us.engagement_type_id = et.id
       LEFT JOIN users u ON us.created_by = u.id
       LEFT JOIN users u2 ON us.updated_by = u2.id
-      WHERE us.is_active = 1
+      ${whereClause}
       ORDER BY us.created_at DESC
     `);
     return stmt.all();
@@ -612,7 +620,16 @@ export const uploadedSOWOps = {
     stmt.run(userId, id);
   },
 
-  // Note: No delete operation - only deactivation allowed
+  reactivate: (id, userId) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET is_active = 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(userId, id);
+  },
+
+  // Note: No delete operation - only deactivation/reactivation allowed
 };
 
 export default db;
