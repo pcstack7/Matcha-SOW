@@ -378,7 +378,8 @@ app.delete("/api/users/:id", requireAdmin, (req, res) => {
 // Get all products
 app.get("/api/products", isAuthenticated, (req, res) => {
   try {
-    const products = productOps.getAll();
+    const filter = req.query.filter || 'active'; // 'active', 'inactive', or 'all'
+    const products = productOps.getAll(filter);
     res.json(products);
   } catch (err) {
     console.error("Error fetching products:", err);
@@ -432,14 +433,27 @@ app.put("/api/products/:id", requireAdmin, (req, res) => {
   }
 });
 
-// Delete product (Admin only)
-app.delete("/api/products/:id", requireAdmin, (req, res) => {
+// Deactivate product (Admin only)
+app.patch("/api/products/:id/deactivate", requireAdmin, (req, res) => {
   try {
-    productOps.delete(req.params.id);
-    res.json({ message: "Product deleted successfully" });
+    productOps.deactivate(req.params.id);
+    const product = productOps.getById(req.params.id);
+    res.json({ message: "Product deactivated successfully", product });
   } catch (err) {
-    console.error("Error deleting product:", err);
-    res.status(500).json({ error: "Failed to delete product" });
+    console.error("Error deactivating product:", err);
+    res.status(500).json({ error: "Failed to deactivate product" });
+  }
+});
+
+// Reactivate product (Admin only)
+app.patch("/api/products/:id/reactivate", requireAdmin, (req, res) => {
+  try {
+    productOps.reactivate(req.params.id);
+    const product = productOps.getById(req.params.id);
+    res.json({ message: "Product reactivated successfully", product });
+  } catch (err) {
+    console.error("Error reactivating product:", err);
+    res.status(500).json({ error: "Failed to reactivate product" });
   }
 });
 
@@ -450,7 +464,8 @@ app.delete("/api/products/:id", requireAdmin, (req, res) => {
 // Get all engagement types
 app.get("/api/engagement-types", isAuthenticated, (req, res) => {
   try {
-    const engagementTypes = engagementTypeOps.getAll();
+    const filter = req.query.filter || 'active'; // 'active', 'inactive', or 'all'
+    const engagementTypes = engagementTypeOps.getAll(filter);
     res.json(engagementTypes);
   } catch (err) {
     console.error("Error fetching engagement types:", err);
@@ -504,14 +519,27 @@ app.put("/api/engagement-types/:id", requireAdmin, (req, res) => {
   }
 });
 
-// Delete engagement type (Admin only)
-app.delete("/api/engagement-types/:id", requireAdmin, (req, res) => {
+// Deactivate engagement type (Admin only)
+app.patch("/api/engagement-types/:id/deactivate", requireAdmin, (req, res) => {
   try {
-    engagementTypeOps.delete(req.params.id);
-    res.json({ message: "Engagement type deleted successfully" });
+    engagementTypeOps.deactivate(req.params.id);
+    const engagementType = engagementTypeOps.getById(req.params.id);
+    res.json({ message: "Engagement type deactivated successfully", engagementType });
   } catch (err) {
-    console.error("Error deleting engagement type:", err);
-    res.status(500).json({ error: "Failed to delete engagement type" });
+    console.error("Error deactivating engagement type:", err);
+    res.status(500).json({ error: "Failed to deactivate engagement type" });
+  }
+});
+
+// Reactivate engagement type (Admin only)
+app.patch("/api/engagement-types/:id/reactivate", requireAdmin, (req, res) => {
+  try {
+    engagementTypeOps.reactivate(req.params.id);
+    const engagementType = engagementTypeOps.getById(req.params.id);
+    res.json({ message: "Engagement type reactivated successfully", engagementType });
+  } catch (err) {
+    console.error("Error reactivating engagement type:", err);
+    res.status(500).json({ error: "Failed to reactivate engagement type" });
   }
 });
 
@@ -714,7 +742,8 @@ app.put("/api/uploaded-sows/:id/reactivate", isAuthenticated, (req, res) => {
 // Get all accounts
 app.get("/api/accounts", isAuthenticated, (req, res) => {
   try {
-    const accounts = accountOps.getAll();
+    const filter = req.query.filter || 'active'; // 'active', 'inactive', or 'all'
+    const accounts = accountOps.getAll(filter);
     res.json(accounts);
   } catch (err) {
     console.error("Error fetching accounts:", err);
@@ -768,14 +797,27 @@ app.put("/api/accounts/:id", requireAdmin, (req, res) => {
   }
 });
 
-// Delete account (Admin only)
-app.delete("/api/accounts/:id", requireAdmin, (req, res) => {
+// Deactivate account (Admin only)
+app.patch("/api/accounts/:id/deactivate", requireAdmin, (req, res) => {
   try {
-    accountOps.delete(req.params.id);
-    res.json({ message: "Account deleted successfully" });
+    accountOps.deactivate(req.params.id);
+    const account = accountOps.getById(req.params.id);
+    res.json({ message: "Account deactivated successfully", account });
   } catch (err) {
-    console.error("Error deleting account:", err);
-    res.status(500).json({ error: "Failed to delete account" });
+    console.error("Error deactivating account:", err);
+    res.status(500).json({ error: "Failed to deactivate account" });
+  }
+});
+
+// Reactivate account (Admin only)
+app.patch("/api/accounts/:id/reactivate", requireAdmin, (req, res) => {
+  try {
+    accountOps.reactivate(req.params.id);
+    const account = accountOps.getById(req.params.id);
+    res.json({ message: "Account reactivated successfully", account });
+  } catch (err) {
+    console.error("Error reactivating account:", err);
+    res.status(500).json({ error: "Failed to reactivate account" });
   }
 });
 
