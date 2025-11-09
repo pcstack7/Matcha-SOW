@@ -6,6 +6,7 @@ import TemplateManagement from './components/TemplateManagement';
 import SOWGenerator from './components/SOWGenerator';
 import SOWList from './components/SOWList';
 import UserManagement from './components/UserManagement';
+import UploadedSOWManagement from './components/UploadedSOWManagement';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -65,6 +66,8 @@ function App() {
         return <SOWGenerator />;
       case 'history':
         return <SOWList />;
+      case 'sow-bank':
+        return <UploadedSOWManagement userRole={user?.role} />;
       case 'accounts':
         return <AccountManagement userRole={user?.role} />;
       case 'products':
@@ -132,6 +135,12 @@ function App() {
             onClick={() => setActiveView('history')}
           >
             SOW History
+          </div>
+          <div
+            className={`nav-item ${activeView === 'sow-bank' ? 'active' : ''}`}
+            onClick={() => setActiveView('sow-bank')}
+          >
+            SOW Knowledge Bank
           </div>
           <div
             className={`nav-item ${activeView === 'accounts' ? 'active' : ''}`}

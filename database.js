@@ -122,6 +122,40 @@ function initializeDatabase() {
     )
   `);
 
+  // Uploaded SOWs table (for SOW Knowledge Bank)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS uploaded_sows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      product_id INTEGER,
+      engagement_type_id INTEGER,
+      description TEXT,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      matcha_file_id TEXT,
+      pricing REAL,
+      currency TEXT DEFAULT 'USD',
+      pm_hours REAL,
+      ic_hours REAL,
+      sa_hours REAL,
+      se_hours REAL,
+      trainer_hours REAL,
+      integration_hours REAL,
+      apac_testing_hours REAL,
+      apac_rd_hours REAL,
+      created_by INTEGER NOT NULL,
+      updated_by INTEGER,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL,
+      FOREIGN KEY (engagement_type_id) REFERENCES engagement_types (id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
+      FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
   console.log('Database initialized successfully');
 }
 
@@ -459,6 +493,126 @@ export const engagementTypeOps = {
     const stmt = db.prepare('DELETE FROM engagement_types WHERE id = ?');
     stmt.run(id);
   }
+};
+
+// Uploaded SOW operations
+export const uploadedSOWOps = {
+  getAll: () => {
+    const stmt = db.prepare(`
+      SELECT
+        us.*,
+        a.name as account_name,
+        p.name as product_name,
+        et.name as engagement_type_name,
+        u.username as created_by_username,
+        u.display_name as created_by_display_name,
+        u2.username as updated_by_username,
+        u2.display_name as updated_by_display_name
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      LEFT JOIN products p ON us.product_id = p.id
+      LEFT JOIN engagement_types et ON us.engagement_type_id = et.id
+      LEFT JOIN users u ON us.created_by = u.id
+      LEFT JOIN users u2 ON us.updated_by = u2.id
+      WHERE us.is_active = 1
+      ORDER BY us.created_at DESC
+    `);
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare(`
+      SELECT
+        us.*,
+        a.name as account_name,
+        p.name as product_name,
+        et.name as engagement_type_name,
+        u.username as created_by_username,
+        u.display_name as created_by_display_name,
+        u2.username as updated_by_username,
+        u2.display_name as updated_by_display_name
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      LEFT JOIN products p ON us.product_id = p.id
+      LEFT JOIN engagement_types et ON us.engagement_type_id = et.id
+      LEFT JOIN users u ON us.created_by = u.id
+      LEFT JOIN users u2 ON us.updated_by = u2.id
+      WHERE us.id = ?
+    `);
+    return stmt.get(id);
+  },
+
+  create: (uploadedSOW) => {
+    const stmt = db.prepare(`
+      INSERT INTO uploaded_sows (
+        account_id, product_id, engagement_type_id, description, file_name, file_path,
+        matcha_file_id, pricing, currency, pm_hours, ic_hours, sa_hours, se_hours,
+        trainer_hours, integration_hours, apac_testing_hours, apac_rd_hours, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      uploadedSOW.account_id,
+      uploadedSOW.product_id || null,
+      uploadedSOW.engagement_type_id || null,
+      uploadedSOW.description || null,
+      uploadedSOW.file_name,
+      uploadedSOW.file_path,
+      uploadedSOW.matcha_file_id || null,
+      uploadedSOW.pricing || null,
+      uploadedSOW.currency || 'USD',
+      uploadedSOW.pm_hours || null,
+      uploadedSOW.ic_hours || null,
+      uploadedSOW.sa_hours || null,
+      uploadedSOW.se_hours || null,
+      uploadedSOW.trainer_hours || null,
+      uploadedSOW.integration_hours || null,
+      uploadedSOW.apac_testing_hours || null,
+      uploadedSOW.apac_rd_hours || null,
+      uploadedSOW.created_by
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, uploadedSOW) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET account_id = ?, product_id = ?, engagement_type_id = ?, description = ?,
+          pricing = ?, currency = ?, pm_hours = ?, ic_hours = ?, sa_hours = ?, se_hours = ?,
+          trainer_hours = ?, integration_hours = ?, apac_testing_hours = ?, apac_rd_hours = ?,
+          updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(
+      uploadedSOW.account_id,
+      uploadedSOW.product_id || null,
+      uploadedSOW.engagement_type_id || null,
+      uploadedSOW.description || null,
+      uploadedSOW.pricing || null,
+      uploadedSOW.currency || 'USD',
+      uploadedSOW.pm_hours || null,
+      uploadedSOW.ic_hours || null,
+      uploadedSOW.sa_hours || null,
+      uploadedSOW.se_hours || null,
+      uploadedSOW.trainer_hours || null,
+      uploadedSOW.integration_hours || null,
+      uploadedSOW.apac_testing_hours || null,
+      uploadedSOW.apac_rd_hours || null,
+      uploadedSOW.updated_by,
+      id
+    );
+  },
+
+  deactivate: (id, userId) => {
+    const stmt = db.prepare(`
+      UPDATE uploaded_sows
+      SET is_active = 0, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(userId, id);
+  },
+
+  // Note: No delete operation - only deactivation allowed
 };
 
 export default db;
