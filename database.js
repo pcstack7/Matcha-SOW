@@ -632,4 +632,177 @@ export const uploadedSOWOps = {
   // Note: No delete operation - only deactivation/reactivation allowed
 };
 
+// Dashboard analytics operations
+export const dashboardOps = {
+  // Get total counts
+  getCounts: () => {
+    const stmt = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM sows) as total_generated_sows,
+        (SELECT COUNT(*) FROM uploaded_sows WHERE is_active = 1) as total_uploaded_sows,
+        (SELECT COUNT(*) FROM accounts) as total_accounts,
+        (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_users
+    `);
+    return stmt.get();
+  },
+
+  // Get pricing summary
+  getPricingSummary: () => {
+    const stmt = db.prepare(`
+      SELECT
+        currency,
+        COUNT(*) as count,
+        SUM(pricing) as total,
+        AVG(pricing) as average,
+        MIN(pricing) as minimum,
+        MAX(pricing) as maximum
+      FROM uploaded_sows
+      WHERE is_active = 1 AND pricing IS NOT NULL
+      GROUP BY currency
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by account
+  getPricingByAccount: () => {
+    const stmt = db.prepare(`
+      SELECT
+        a.name as account_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN accounts a ON us.account_id = a.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY a.id, us.currency
+      ORDER BY total_pricing DESC
+      LIMIT 10
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by product
+  getPricingByProduct: () => {
+    const stmt = db.prepare(`
+      SELECT
+        p.name as product_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN products p ON us.product_id = p.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY p.id, us.currency
+      ORDER BY total_pricing DESC
+    `);
+    return stmt.all();
+  },
+
+  // Get pricing by user
+  getPricingByUser: () => {
+    const stmt = db.prepare(`
+      SELECT
+        u.display_name as user_name,
+        us.currency,
+        COUNT(us.id) as sow_count,
+        SUM(us.pricing) as total_pricing
+      FROM uploaded_sows us
+      JOIN users u ON us.created_by = u.id
+      WHERE us.is_active = 1 AND us.pricing IS NOT NULL
+      GROUP BY u.id, us.currency
+      ORDER BY total_pricing DESC
+    `);
+    return stmt.all();
+  },
+
+  // Get resource hours breakdown
+  getResourceHoursBreakdown: () => {
+    const stmt = db.prepare(`
+      SELECT
+        SUM(pm_hours) as pm_hours,
+        SUM(ic_hours) as ic_hours,
+        SUM(sa_hours) as sa_hours,
+        SUM(se_hours) as se_hours,
+        SUM(trainer_hours) as trainer_hours,
+        SUM(integration_hours) as integration_hours,
+        SUM(apac_testing_hours) as apac_testing_hours,
+        SUM(apac_rd_hours) as apac_rd_hours
+      FROM uploaded_sows
+      WHERE is_active = 1
+    `);
+    return stmt.get();
+  },
+
+  // Get top accounts by SOW count
+  getTopAccountsBySowCount: (limit = 10) => {
+    const stmt = db.prepare(`
+      SELECT
+        a.name as account_name,
+        COUNT(us.id) as sow_count,
+        COUNT(CASE WHEN us.is_active = 1 THEN 1 END) as active_count
+      FROM accounts a
+      LEFT JOIN uploaded_sows us ON a.id = us.account_id
+      GROUP BY a.id
+      ORDER BY sow_count DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit);
+  },
+
+  // Get SOW creation timeline (last 12 months)
+  getSowTimeline: () => {
+    const stmt = db.prepare(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as generated_count
+      FROM sows
+      WHERE created_at >= date('now', '-12 months')
+      GROUP BY month
+      ORDER BY month
+    `);
+    const generated = stmt.all();
+
+    const uploadStmt = db.prepare(`
+      SELECT
+        strftime('%Y-%m', created_at) as month,
+        COUNT(*) as uploaded_count
+      FROM uploaded_sows
+      WHERE created_at >= date('now', '-12 months') AND is_active = 1
+      GROUP BY month
+      ORDER BY month
+    `);
+    const uploaded = uploadStmt.all();
+
+    // Merge the two datasets
+    const timeline = {};
+    generated.forEach(item => {
+      timeline[item.month] = { month: item.month, generated: item.generated_count, uploaded: 0 };
+    });
+    uploaded.forEach(item => {
+      if (timeline[item.month]) {
+        timeline[item.month].uploaded = item.uploaded_count;
+      } else {
+        timeline[item.month] = { month: item.month, generated: 0, uploaded: item.uploaded_count };
+      }
+    });
+
+    return Object.values(timeline).sort((a, b) => a.month.localeCompare(b.month));
+  },
+
+  // Get engagement type distribution
+  getEngagementTypeDistribution: () => {
+    const stmt = db.prepare(`
+      SELECT
+        et.name as engagement_type,
+        COUNT(us.id) as count
+      FROM uploaded_sows us
+      JOIN engagement_types et ON us.engagement_type_id = et.id
+      WHERE us.is_active = 1
+      GROUP BY et.id
+      ORDER BY count DESC
+    `);
+    return stmt.all();
+  },
+};
+
 export default db;

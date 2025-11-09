@@ -10,7 +10,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps } from "./database.js";
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -1543,6 +1543,40 @@ app.get("/api/export/:id/txt", isAuthenticated, (req, res) => {
 });
 
 // ============================================
+// DASHBOARD ANALYTICS ENDPOINT
+// ============================================
+
+// Get dashboard analytics data
+app.get("/api/dashboard", isAuthenticated, (req, res) => {
+  try {
+    const counts = dashboardOps.getCounts();
+    const pricingSummary = dashboardOps.getPricingSummary();
+    const pricingByAccount = dashboardOps.getPricingByAccount();
+    const pricingByProduct = dashboardOps.getPricingByProduct();
+    const pricingByUser = dashboardOps.getPricingByUser();
+    const resourceHours = dashboardOps.getResourceHoursBreakdown();
+    const topAccounts = dashboardOps.getTopAccountsBySowCount(10);
+    const timeline = dashboardOps.getSowTimeline();
+    const engagementTypes = dashboardOps.getEngagementTypeDistribution();
+
+    res.json({
+      counts,
+      pricingSummary,
+      pricingByAccount,
+      pricingByProduct,
+      pricingByUser,
+      resourceHours,
+      topAccounts,
+      timeline,
+      engagementTypes,
+    });
+  } catch (err) {
+    console.error("Error fetching dashboard data:", err);
+    res.status(500).json({ error: "Failed to fetch dashboard data" });
+  }
+});
+
+// ============================================
 // LEGACY CHAT ENDPOINT (preserved)
 // ============================================
 
@@ -1586,7 +1620,7 @@ app.post("/chat", async (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // Fallback to index.html for client-side routing
-app.get("*", (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 

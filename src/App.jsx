@@ -7,6 +7,7 @@ import SOWGenerator from './components/SOWGenerator';
 import SOWList from './components/SOWList';
 import UserManagement from './components/UserManagement';
 import UploadedSOWManagement from './components/UploadedSOWManagement';
+import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -62,6 +63,8 @@ function App() {
 
   const renderContent = () => {
     switch (activeView) {
+      case 'dashboard':
+        return <Dashboard />;
       case 'generate':
         return <SOWGenerator />;
       case 'history':
@@ -124,6 +127,12 @@ function App() {
         </div>
 
         <nav className="sidebar-nav">
+          <div
+            className={`nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveView('dashboard')}
+          >
+            Dashboard
+          </div>
           <div
             className={`nav-item ${activeView === 'generate' ? 'active' : ''}`}
             onClick={() => setActiveView('generate')}
