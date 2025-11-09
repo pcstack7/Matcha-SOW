@@ -6,6 +6,7 @@ function AccountManagement({ userRole }) {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
+  const [filter, setFilter] = useState('active'); // 'active', 'inactive', or 'all'
   const [formData, setFormData] = useState({
     name: '',
     account_contact: '',
@@ -18,12 +19,12 @@ function AccountManagement({ userRole }) {
 
   useEffect(() => {
     loadAccounts();
-  }, []);
+  }, [filter]);
 
   const loadAccounts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/accounts', { credentials: 'include' });
+      const response = await fetch(`/api/accounts?filter=${filter}`, { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch accounts');
@@ -109,20 +110,42 @@ function AccountManagement({ userRole }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this account?')) {
+  const handleDeactivate = async (id) => {
+    if (!window.confirm('Are you sure you want to deactivate this account?')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/accounts/${id}`, {
-        method: 'DELETE',
+      const response = await fetch(`/api/accounts/${id}/deactivate`, {
+        method: 'PATCH',
         credentials: 'include',
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to delete account');
+        throw new Error(data.error || 'Failed to deactivate account');
+      }
+
+      loadAccounts();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleReactivate = async (id) => {
+    if (!window.confirm('Are you sure you want to reactivate this account?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/accounts/${id}/reactivate`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to reactivate account');
       }
 
       loadAccounts();
@@ -158,18 +181,30 @@ function AccountManagement({ userRole }) {
       <div className="card">
         <div className="card-header">
           <h3>Accounts</h3>
-          {isAdmin && (
-            <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-              + Add Account
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <select
+              className="form-control"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{ width: 'auto', minWidth: '150px' }}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="all">All</option>
+            </select>
+            {isAdmin && (
+              <button className="btn btn-primary" onClick={() => handleOpenModal()}>
+                + Add Account
+              </button>
+            )}
+          </div>
         </div>
 
         {accounts.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📋</div>
-            <p>No accounts yet.</p>
-            {isAdmin && <p>Click "Add Account" to create your first account.</p>}
+            <p>No accounts found.</p>
+            {isAdmin && filter === 'active' && <p>Click "Add Account" to create your first account.</p>}
           </div>
         ) : (
           <div className="table-container">
@@ -180,6 +215,7 @@ function AccountManagement({ userRole }) {
                   <th>Account Contact</th>
                   <th>Email</th>
                   <th>Phone</th>
+                  <th>Status</th>
                   {isAdmin && <th>Actions</th>}
                 </tr>
               </thead>
@@ -190,21 +226,38 @@ function AccountManagement({ userRole }) {
                     <td>{account.account_contact || '-'}</td>
                     <td>{account.email || '-'}</td>
                     <td>{account.phone || '-'}</td>
+                    <td>
+                      <span className={`badge ${account.is_active ? 'badge-success' : 'badge-secondary'}`}>
+                        {account.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
                     {isAdmin && (
                       <td>
                         <div className="action-buttons">
-                          <button
-                            className="btn btn-small btn-outline"
-                            onClick={() => handleOpenModal(account)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-small btn-danger"
-                            onClick={() => handleDelete(account.id)}
-                          >
-                            Delete
-                          </button>
+                          {account.is_active && (
+                            <>
+                              <button
+                                className="btn btn-small btn-outline"
+                                onClick={() => handleOpenModal(account)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-small btn-warning"
+                                onClick={() => handleDeactivate(account.id)}
+                              >
+                                Deactivate
+                              </button>
+                            </>
+                          )}
+                          {!account.is_active && (
+                            <button
+                              className="btn btn-small btn-success"
+                              onClick={() => handleReactivate(account.id)}
+                            >
+                              Reactivate
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}

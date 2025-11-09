@@ -6,6 +6,7 @@ function ProductManagement({ userRole }) {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [filter, setFilter] = useState('active'); // 'active', 'inactive', or 'all'
   const [formData, setFormData] = useState({
     name: '',
     portfolio: '',
@@ -16,12 +17,12 @@ function ProductManagement({ userRole }) {
 
   useEffect(() => {
     loadProducts();
-  }, []);
+  }, [filter]);
 
   const loadProducts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/products', { credentials: 'include' });
+      const response = await fetch(`/api/products?filter=${filter}`, { credentials: 'include' });
 
       if (!response.ok) {
         throw new Error('Failed to fetch products');
@@ -107,20 +108,42 @@ function ProductManagement({ userRole }) {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this product?')) {
+  const handleDeactivate = async (id) => {
+    if (!window.confirm('Are you sure you want to deactivate this product?')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/products/${id}`, {
-        method: 'DELETE',
+      const response = await fetch(`/api/products/${id}/deactivate`, {
+        method: 'PATCH',
         credentials: 'include',
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to delete product');
+        throw new Error(data.error || 'Failed to deactivate product');
+      }
+
+      loadProducts();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleReactivate = async (id) => {
+    if (!window.confirm('Are you sure you want to reactivate this product?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/products/${id}/reactivate`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to reactivate product');
       }
 
       loadProducts();
@@ -156,18 +179,30 @@ function ProductManagement({ userRole }) {
       <div className="card">
         <div className="card-header">
           <h3>Products</h3>
-          {isAdmin && (
-            <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-              + Add Product
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <select
+              className="form-control"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{ width: 'auto', minWidth: '150px' }}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="all">All</option>
+            </select>
+            {isAdmin && (
+              <button className="btn btn-primary" onClick={() => handleOpenModal()}>
+                + Add Product
+              </button>
+            )}
+          </div>
         </div>
 
         {products.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📦</div>
-            <p>No products yet.</p>
-            {isAdmin && <p>Click "Add Product" to create your first product.</p>}
+            <p>No products found.</p>
+            {isAdmin && filter === 'active' && <p>Click "Add Product" to create your first product.</p>}
           </div>
         ) : (
           <div className="table-container">
@@ -177,7 +212,7 @@ function ProductManagement({ userRole }) {
                   <th>Name</th>
                   <th>Portfolio</th>
                   <th>Description</th>
-                  <th>Created</th>
+                  <th>Status</th>
                   {isAdmin && <th>Actions</th>}
                 </tr>
               </thead>
@@ -187,22 +222,38 @@ function ProductManagement({ userRole }) {
                     <td>{product.name}</td>
                     <td>{product.portfolio || '-'}</td>
                     <td>{product.description || '-'}</td>
-                    <td>{new Date(product.created_at).toLocaleDateString()}</td>
+                    <td>
+                      <span className={`badge ${product.is_active ? 'badge-success' : 'badge-secondary'}`}>
+                        {product.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
                     {isAdmin && (
                       <td>
                         <div className="action-buttons">
-                          <button
-                            className="btn btn-small btn-outline"
-                            onClick={() => handleOpenModal(product)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-small btn-danger"
-                            onClick={() => handleDelete(product.id)}
-                          >
-                            Delete
-                          </button>
+                          {product.is_active && (
+                            <>
+                              <button
+                                className="btn btn-small btn-outline"
+                                onClick={() => handleOpenModal(product)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-small btn-warning"
+                                onClick={() => handleDeactivate(product.id)}
+                              >
+                                Deactivate
+                              </button>
+                            </>
+                          )}
+                          {!product.is_active && (
+                            <button
+                              className="btn btn-small btn-success"
+                              onClick={() => handleReactivate(product.id)}
+                            >
+                              Reactivate
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}

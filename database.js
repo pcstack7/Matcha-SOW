@@ -19,6 +19,7 @@ function migrateDatabase() {
     const hasAddress = tableInfo.some(col => col.name === 'address');
     const hasAccountContact = tableInfo.some(col => col.name === 'account_contact');
     const hasNotes = tableInfo.some(col => col.name === 'notes');
+    const hasIsActive = tableInfo.some(col => col.name === 'is_active');
 
     if (hasCompany && !hasAccountContact) {
       console.log('Migrating: Renaming company to account_contact...');
@@ -29,9 +30,41 @@ function migrateDatabase() {
       console.log('Migrating: Renaming address to notes...');
       db.exec(`ALTER TABLE accounts RENAME COLUMN address TO notes`);
     }
+
+    // Add is_active column to accounts if it doesn't exist
+    if (!hasIsActive) {
+      console.log('Migrating: Adding is_active column to accounts...');
+      db.exec(`ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 1`);
+    }
   } catch (err) {
     // Table doesn't exist yet, will be created
     console.log('No migration needed - creating fresh database');
+  }
+
+  // Add is_active column to products if it doesn't exist
+  try {
+    const productTableInfo = db.prepare("PRAGMA table_info(products)").all();
+    const hasIsActive = productTableInfo.some(col => col.name === 'is_active');
+
+    if (!hasIsActive) {
+      console.log('Migrating: Adding is_active column to products...');
+      db.exec(`ALTER TABLE products ADD COLUMN is_active INTEGER DEFAULT 1`);
+    }
+  } catch (err) {
+    console.log('Products table migration skipped');
+  }
+
+  // Add is_active column to engagement_types if it doesn't exist
+  try {
+    const engagementTypeTableInfo = db.prepare("PRAGMA table_info(engagement_types)").all();
+    const hasIsActive = engagementTypeTableInfo.some(col => col.name === 'is_active');
+
+    if (!hasIsActive) {
+      console.log('Migrating: Adding is_active column to engagement_types...');
+      db.exec(`ALTER TABLE engagement_types ADD COLUMN is_active INTEGER DEFAULT 1`);
+    }
+  } catch (err) {
+    console.log('Engagement types table migration skipped');
   }
 }
 
@@ -63,6 +96,7 @@ function initializeDatabase() {
       email TEXT,
       phone TEXT,
       notes TEXT,
+      is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -86,6 +120,7 @@ function initializeDatabase() {
       name TEXT NOT NULL,
       portfolio TEXT,
       description TEXT,
+      is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -97,6 +132,7 @@ function initializeDatabase() {
       name TEXT NOT NULL,
       category TEXT,
       description TEXT,
+      is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -247,8 +283,16 @@ export const userOps = {
 
 // Account operations
 export const accountOps = {
-  getAll: () => {
-    const stmt = db.prepare('SELECT * FROM accounts ORDER BY created_at DESC');
+  getAll: (filter = 'active') => {
+    let whereClause = '';
+    if (filter === 'active') {
+      whereClause = 'WHERE is_active = 1';
+    } else if (filter === 'inactive') {
+      whereClause = 'WHERE is_active = 0';
+    }
+    // if filter === 'all', no WHERE clause needed
+
+    const stmt = db.prepare(`SELECT * FROM accounts ${whereClause} ORDER BY created_at DESC`);
     return stmt.all();
   },
 
@@ -288,8 +332,21 @@ export const accountOps = {
     );
   },
 
-  delete: (id) => {
-    const stmt = db.prepare('DELETE FROM accounts WHERE id = ?');
+  deactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE accounts
+      SET is_active = 0
+      WHERE id = ?
+    `);
+    stmt.run(id);
+  },
+
+  reactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE accounts
+      SET is_active = 1
+      WHERE id = ?
+    `);
     stmt.run(id);
   }
 };
@@ -407,8 +464,16 @@ export const sowOps = {
 
 // Product operations
 export const productOps = {
-  getAll: () => {
-    const stmt = db.prepare('SELECT * FROM products ORDER BY created_at DESC');
+  getAll: (filter = 'active') => {
+    let whereClause = '';
+    if (filter === 'active') {
+      whereClause = 'WHERE is_active = 1';
+    } else if (filter === 'inactive') {
+      whereClause = 'WHERE is_active = 0';
+    }
+    // if filter === 'all', no WHERE clause needed
+
+    const stmt = db.prepare(`SELECT * FROM products ${whereClause} ORDER BY created_at DESC`);
     return stmt.all();
   },
 
@@ -444,16 +509,37 @@ export const productOps = {
     );
   },
 
-  delete: (id) => {
-    const stmt = db.prepare('DELETE FROM products WHERE id = ?');
+  deactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE products
+      SET is_active = 0
+      WHERE id = ?
+    `);
+    stmt.run(id);
+  },
+
+  reactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE products
+      SET is_active = 1
+      WHERE id = ?
+    `);
     stmt.run(id);
   }
 };
 
 // Engagement Type operations
 export const engagementTypeOps = {
-  getAll: () => {
-    const stmt = db.prepare('SELECT * FROM engagement_types ORDER BY created_at DESC');
+  getAll: (filter = 'active') => {
+    let whereClause = '';
+    if (filter === 'active') {
+      whereClause = 'WHERE is_active = 1';
+    } else if (filter === 'inactive') {
+      whereClause = 'WHERE is_active = 0';
+    }
+    // if filter === 'all', no WHERE clause needed
+
+    const stmt = db.prepare(`SELECT * FROM engagement_types ${whereClause} ORDER BY created_at DESC`);
     return stmt.all();
   },
 
@@ -489,8 +575,21 @@ export const engagementTypeOps = {
     );
   },
 
-  delete: (id) => {
-    const stmt = db.prepare('DELETE FROM engagement_types WHERE id = ?');
+  deactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE engagement_types
+      SET is_active = 0
+      WHERE id = ?
+    `);
+    stmt.run(id);
+  },
+
+  reactivate: (id) => {
+    const stmt = db.prepare(`
+      UPDATE engagement_types
+      SET is_active = 1
+      WHERE id = ?
+    `);
     stmt.run(id);
   }
 };
