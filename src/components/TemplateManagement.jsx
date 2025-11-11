@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { templateApi } from '../services/api';
+import { formatContent } from '../utils/formatContent';
 
 function TemplateManagement() {
   const [templates, setTemplates] = useState([]);
@@ -274,7 +275,7 @@ function TemplateManagement() {
               </button>
             </div>
 
-            <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
               {loadingContent ? (
                 <div style={{ textAlign: 'center', padding: '2rem' }}>
                   <div className="spinner"></div>
@@ -301,19 +302,8 @@ function TemplateManagement() {
                       {viewingTemplate?.file_type.toUpperCase().replace('.', '')}
                     </span>
                   </div>
-                  <div
-                    style={{
-                      backgroundColor: '#f5f5f5',
-                      padding: '1rem',
-                      borderRadius: '4px',
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                      lineHeight: '1.6',
-                      border: '1px solid #ddd',
-                    }}
-                  >
-                    {templateContent || 'No content available'}
+                  <div className="sow-preview" style={{ padding: '1rem', backgroundColor: '#fff' }}>
+                    {templateContent ? formatContent(templateContent) : <p>No content available</p>}
                   </div>
                 </div>
               )}
