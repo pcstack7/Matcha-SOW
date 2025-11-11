@@ -13,6 +13,7 @@ function TemplateManagement() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewingTemplate, setViewingTemplate] = useState(null);
   const [templateContent, setTemplateContent] = useState('');
+  const [contentType, setContentType] = useState('text');
   const [loadingContent, setLoadingContent] = useState(false);
 
   useEffect(() => {
@@ -83,6 +84,7 @@ function TemplateManagement() {
       setShowViewModal(true);
       const data = await templateApi.getContent(template.id);
       setTemplateContent(data.content);
+      setContentType(data.content_type || 'text');
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -96,6 +98,7 @@ function TemplateManagement() {
     setShowViewModal(false);
     setViewingTemplate(null);
     setTemplateContent('');
+    setContentType('text');
   };
 
   const formatDate = (dateString) => {
@@ -302,8 +305,24 @@ function TemplateManagement() {
                       {viewingTemplate?.file_type.toUpperCase().replace('.', '')}
                     </span>
                   </div>
-                  <div className="sow-preview" style={{ padding: '1rem', backgroundColor: '#fff' }}>
-                    {templateContent ? formatContent(templateContent) : <p>No content available</p>}
+                  <div
+                    className="template-content-view"
+                    style={{
+                      padding: '1.5rem',
+                      backgroundColor: '#fff',
+                      maxHeight: '100%',
+                      overflow: 'auto'
+                    }}
+                  >
+                    {templateContent ? (
+                      contentType === 'html' ? (
+                        <div dangerouslySetInnerHTML={{ __html: templateContent }} />
+                      ) : (
+                        formatContent(templateContent)
+                      )
+                    ) : (
+                      <p>No content available</p>
+                    )}
                   </div>
                 </div>
               )}

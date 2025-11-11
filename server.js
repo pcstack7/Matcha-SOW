@@ -909,20 +909,23 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
     }
 
     let content = "";
+    let contentType = "text"; // 'text', 'html'
 
     // Handle different file types
     switch (template.file_type) {
       case ".txt":
         // For TXT files, use the content from database or read the file
         content = template.content || fs.readFileSync(template.file_path, "utf8");
+        contentType = "text";
         break;
 
       case ".pdf":
-        // Extract text from PDF
+        // Extract text from PDF with structure preservation
         try {
           const dataBuffer = fs.readFileSync(template.file_path);
           const pdfData = await pdfParse(dataBuffer);
           content = pdfData.text;
+          contentType = "text";
         } catch (pdfErr) {
           console.error("Error parsing PDF:", pdfErr);
           return res.status(500).json({ error: "Failed to extract PDF content" });
@@ -930,10 +933,11 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
         break;
 
       case ".docx":
-        // Extract text from DOCX
+        // Extract HTML from DOCX to preserve formatting
         try {
-          const result = await mammoth.extractRawText({ path: template.file_path });
+          const result = await mammoth.convertToHtml({ path: template.file_path });
           content = result.value;
+          contentType = "html";
         } catch (docxErr) {
           console.error("Error parsing DOCX:", docxErr);
           return res.status(500).json({ error: "Failed to extract DOCX content" });
@@ -948,7 +952,8 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
       id: template.id,
       name: template.name,
       file_type: template.file_type,
-      content: content
+      content: content,
+      content_type: contentType
     });
   } catch (err) {
     console.error("Error fetching template content:", err);
