@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import multer from "multer";
 import fs from "fs";
 import session from "express-session";
@@ -14,8 +15,11 @@ import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
+
+// Import CommonJS modules using createRequire
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 dotenv.config();
 
