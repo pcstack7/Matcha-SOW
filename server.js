@@ -14,6 +14,8 @@ import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
+import pdfParse from "pdf-parse";
+import mammoth from "mammoth";
 
 dotenv.config();
 
@@ -886,6 +888,67 @@ app.delete("/api/templates/:id", isAuthenticated, (req, res) => {
   } catch (err) {
     console.error("Error deleting template:", err);
     res.status(500).json({ error: "Failed to delete template" });
+  }
+});
+
+// Get template content
+app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
+  try {
+    const template = templateOps.getById(req.params.id);
+    if (!template) {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(404).json({ error: "Template file not found" });
+    }
+
+    let content = "";
+
+    // Handle different file types
+    switch (template.file_type) {
+      case ".txt":
+        // For TXT files, use the content from database or read the file
+        content = template.content || fs.readFileSync(template.file_path, "utf8");
+        break;
+
+      case ".pdf":
+        // Extract text from PDF
+        try {
+          const dataBuffer = fs.readFileSync(template.file_path);
+          const pdfData = await pdfParse(dataBuffer);
+          content = pdfData.text;
+        } catch (pdfErr) {
+          console.error("Error parsing PDF:", pdfErr);
+          return res.status(500).json({ error: "Failed to extract PDF content" });
+        }
+        break;
+
+      case ".docx":
+        // Extract text from DOCX
+        try {
+          const result = await mammoth.extractRawText({ path: template.file_path });
+          content = result.value;
+        } catch (docxErr) {
+          console.error("Error parsing DOCX:", docxErr);
+          return res.status(500).json({ error: "Failed to extract DOCX content" });
+        }
+        break;
+
+      default:
+        return res.status(400).json({ error: "Unsupported file type" });
+    }
+
+    res.json({
+      id: template.id,
+      name: template.name,
+      file_type: template.file_type,
+      content: content
+    });
+  } catch (err) {
+    console.error("Error fetching template content:", err);
+    res.status(500).json({ error: "Failed to fetch template content" });
   }
 });
 

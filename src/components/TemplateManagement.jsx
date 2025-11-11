@@ -9,6 +9,10 @@ function TemplateManagement() {
   const [showModal, setShowModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [templateName, setTemplateName] = useState('');
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [viewingTemplate, setViewingTemplate] = useState(null);
+  const [templateContent, setTemplateContent] = useState('');
+  const [loadingContent, setLoadingContent] = useState(false);
 
   useEffect(() => {
     loadTemplates();
@@ -69,6 +73,28 @@ function TemplateManagement() {
     setShowModal(false);
     setSelectedFile(null);
     setTemplateName('');
+  };
+
+  const handleViewTemplate = async (template) => {
+    try {
+      setLoadingContent(true);
+      setViewingTemplate(template);
+      setShowViewModal(true);
+      const data = await templateApi.getContent(template.id);
+      setTemplateContent(data.content);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+      setShowViewModal(false);
+    } finally {
+      setLoadingContent(false);
+    }
+  };
+
+  const handleCloseViewModal = () => {
+    setShowViewModal(false);
+    setViewingTemplate(null);
+    setTemplateContent('');
   };
 
   const formatDate = (dateString) => {
@@ -150,6 +176,13 @@ function TemplateManagement() {
                     <td>{formatDate(template.uploaded_at)}</td>
                     <td>
                       <button
+                        className="btn btn-small btn-primary"
+                        onClick={() => handleViewTemplate(template)}
+                        style={{ marginRight: '0.5rem' }}
+                      >
+                        View
+                      </button>
+                      <button
                         className="btn btn-small btn-danger"
                         onClick={() => handleDelete(template.id)}
                       >
@@ -223,6 +256,74 @@ function TemplateManagement() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showViewModal && (
+        <div className="modal-overlay" onClick={handleCloseViewModal}>
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '800px', width: '90%' }}
+          >
+            <div className="modal-header">
+              <h3>View Template: {viewingTemplate?.name}</h3>
+              <button className="modal-close" onClick={handleCloseViewModal}>
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+              {loadingContent ? (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                  <div className="spinner"></div>
+                  <p>Loading template content...</p>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <span
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '4px',
+                        backgroundColor:
+                          viewingTemplate?.file_type === '.pdf'
+                            ? '#F56E7B'
+                            : viewingTemplate?.file_type === '.docx'
+                            ? '#707CF1'
+                            : '#00BBBA',
+                        color: 'white',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                      }}
+                    >
+                      {viewingTemplate?.file_type.toUpperCase().replace('.', '')}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      backgroundColor: '#f5f5f5',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                      lineHeight: '1.6',
+                      border: '1px solid #ddd',
+                    }}
+                  >
+                    {templateContent || 'No content available'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={handleCloseViewModal}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
