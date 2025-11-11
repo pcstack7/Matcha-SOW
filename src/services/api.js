@@ -82,6 +82,12 @@ export const templateApi = {
     if (!response.ok) throw new Error('Failed to delete template');
     return response.json();
   },
+
+  getContent: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/templates/${id}/content`);
+    if (!response.ok) throw new Error('Failed to fetch template content');
+    return response.json();
+  },
 };
 
 // SOW API

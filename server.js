@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import multer from "multer";
 import fs from "fs";
 import session from "express-session";
@@ -14,6 +15,11 @@ import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
+import mammoth from "mammoth";
+
+// Import CommonJS modules using createRequire
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 dotenv.config();
 
@@ -886,6 +892,72 @@ app.delete("/api/templates/:id", isAuthenticated, (req, res) => {
   } catch (err) {
     console.error("Error deleting template:", err);
     res.status(500).json({ error: "Failed to delete template" });
+  }
+});
+
+// Get template content
+app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
+  try {
+    const template = templateOps.getById(req.params.id);
+    if (!template) {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(404).json({ error: "Template file not found" });
+    }
+
+    let content = "";
+    let contentType = "text"; // 'text', 'html'
+
+    // Handle different file types
+    switch (template.file_type) {
+      case ".txt":
+        // For TXT files, use the content from database or read the file
+        content = template.content || fs.readFileSync(template.file_path, "utf8");
+        contentType = "text";
+        break;
+
+      case ".pdf":
+        // Extract text from PDF with structure preservation
+        try {
+          const dataBuffer = fs.readFileSync(template.file_path);
+          const pdfData = await pdfParse(dataBuffer);
+          content = pdfData.text;
+          contentType = "text";
+        } catch (pdfErr) {
+          console.error("Error parsing PDF:", pdfErr);
+          return res.status(500).json({ error: "Failed to extract PDF content" });
+        }
+        break;
+
+      case ".docx":
+        // Extract HTML from DOCX to preserve formatting
+        try {
+          const result = await mammoth.convertToHtml({ path: template.file_path });
+          content = result.value;
+          contentType = "html";
+        } catch (docxErr) {
+          console.error("Error parsing DOCX:", docxErr);
+          return res.status(500).json({ error: "Failed to extract DOCX content" });
+        }
+        break;
+
+      default:
+        return res.status(400).json({ error: "Unsupported file type" });
+    }
+
+    res.json({
+      id: template.id,
+      name: template.name,
+      file_type: template.file_type,
+      content: content,
+      content_type: contentType
+    });
+  } catch (err) {
+    console.error("Error fetching template content:", err);
+    res.status(500).json({ error: "Failed to fetch template content" });
   }
 });
 
