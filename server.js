@@ -353,6 +353,41 @@ app.put("/api/users/:id/password", requireAdmin, async (req, res) => {
   }
 });
 
+// Self-service password change for authenticated users
+app.put("/api/change-password", isAuthenticated, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters long" });
+    }
+
+    const user = userOps.getById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    // Hash and update new password
+    const password_hash = await bcrypt.hash(newPassword, 10);
+    userOps.updatePassword(req.user.id, password_hash);
+
+    res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Error changing password:", err);
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
 // Delete user
 app.delete("/api/users/:id", requireAdmin, (req, res) => {
   try {
