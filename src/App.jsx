@@ -8,6 +8,7 @@ import SOWList from './components/SOWList';
 import UserManagement from './components/UserManagement';
 import UploadedSOWManagement from './components/UploadedSOWManagement';
 import Dashboard from './components/Dashboard';
+import ChangePassword from './components/ChangePassword';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -81,6 +82,8 @@ function App() {
         return <TemplateManagement />;
       case 'users':
         return <UserManagement />;
+      case 'change-password':
+        return <ChangePassword />;
       default:
         return <SOWGenerator />;
     }
@@ -174,6 +177,12 @@ function App() {
             onClick={() => setActiveView('templates')}
           >
             Manage Templates
+          </div>
+          <div
+            className={`nav-item ${activeView === 'change-password' ? 'active' : ''}`}
+            onClick={() => setActiveView('change-password')}
+          >
+            Change Password
           </div>
           {user.role === 'admin' && (
             <div

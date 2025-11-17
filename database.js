@@ -837,10 +837,20 @@ export const dashboardOps = {
     const stmt = db.prepare(`
       SELECT
         a.name as account_name,
-        COUNT(us.id) as sow_count,
-        COUNT(CASE WHEN us.is_active = 1 THEN 1 END) as active_count
+        COALESCE(generated.count, 0) + COALESCE(uploaded.count, 0) as sow_count,
+        COALESCE(generated.count, 0) + COALESCE(uploaded.active_count, 0) as active_count
       FROM accounts a
-      LEFT JOIN uploaded_sows us ON a.id = us.account_id
+      LEFT JOIN (
+        SELECT account_id, COUNT(*) as count
+        FROM sows
+        GROUP BY account_id
+      ) generated ON a.id = generated.account_id
+      LEFT JOIN (
+        SELECT account_id, COUNT(*) as count, COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_count
+        FROM uploaded_sows
+        GROUP BY account_id
+      ) uploaded ON a.id = uploaded.account_id
+      WHERE (COALESCE(generated.count, 0) + COALESCE(uploaded.count, 0)) > 0
       GROUP BY a.id
       ORDER BY sow_count DESC
       LIMIT ?
