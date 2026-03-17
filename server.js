@@ -1108,7 +1108,9 @@ Format the output as a well-structured document with clear section headers and s
     }
 
     const data = await response.json();
-    const content = data?.output?.[0]?.content?.[0]?.text || "No response generated.";
+    const contentBlock = data?.output?.[0]?.content?.find(c => c.type === 'output_text') || data?.output?.[0]?.content?.[0];
+    const content = contentBlock?.text || "No response generated.";
+
 
     // Save SOW to database with user tracking
     const id = sowOps.create({
@@ -1756,7 +1758,9 @@ app.post("/chat", async (req, res) => {
     }
 
     const data = await response.json();
-    const outputText = data?.output?.[0]?.content?.[0]?.text || "No response text available.";
+    const outputBlock = data?.output?.[0]?.content?.find(c => c.type === 'output_text') || data?.output?.[0]?.content?.[0];
+    const outputText = outputBlock?.text || "No response text available.";
+
 
     res.json({ status: data.status, outputText });
   } catch (err) {
