@@ -32,7 +32,8 @@
     "pdfkit": "^0.17.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "xlsx": "^0.18.5"
   },
   "keywords": [
     "sow",
@@ -41,5 +42,8 @@
     "generator"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "baseline-browser-mapping": "^2.10.15"
+  }
 }

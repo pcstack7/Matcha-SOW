@@ -66,6 +66,24 @@ function migrateDatabase() {
   } catch (err) {
     console.log('Engagement types table migration skipped');
   }
+
+  // Add assumption_set_ids and out_of_scope_set_ids to sows if they don't exist
+  try {
+    const sowTableInfo = db.prepare("PRAGMA table_info(sows)").all();
+    const hasAssumptionSetIds = sowTableInfo.some(col => col.name === 'assumption_set_ids');
+    const hasOutOfScopeSetIds = sowTableInfo.some(col => col.name === 'out_of_scope_set_ids');
+
+    if (!hasAssumptionSetIds) {
+      console.log('Migrating: Adding assumption_set_ids column to sows...');
+      db.exec(`ALTER TABLE sows ADD COLUMN assumption_set_ids TEXT`);
+    }
+    if (!hasOutOfScopeSetIds) {
+      console.log('Migrating: Adding out_of_scope_set_ids column to sows...');
+      db.exec(`ALTER TABLE sows ADD COLUMN out_of_scope_set_ids TEXT`);
+    }
+  } catch (err) {
+    console.log('SOWs table migration skipped');
+  }
 }
 
 // Initialize database schema
@@ -155,6 +173,46 @@ function initializeDatabase() {
       FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL,
       FOREIGN KEY (engagement_type_id) REFERENCES engagement_types (id) ON DELETE SET NULL,
       FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
+  // Scope items table (assumptions and out-of-scope master items)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scope_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      text TEXT NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('assumption', 'out_of_scope')),
+      is_active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
+  // Scope sets table (named sets of items)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scope_sets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('assumption', 'out_of_scope')),
+      description TEXT,
+      is_locked INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
+  // Scope set items junction table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scope_set_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      set_id INTEGER NOT NULL,
+      item_id INTEGER NOT NULL,
+      order_index INTEGER DEFAULT 0,
+      FOREIGN KEY (set_id) REFERENCES scope_sets (id) ON DELETE CASCADE,
+      FOREIGN KEY (item_id) REFERENCES scope_items (id) ON DELETE CASCADE
     )
   `);
 
@@ -440,8 +498,8 @@ export const sowOps = {
 
   create: (sow) => {
     const stmt = db.prepare(`
-      INSERT INTO sows (account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, content, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sows (account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, content, created_by, assumption_set_ids, out_of_scope_set_ids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       sow.account_id,
@@ -451,7 +509,9 @@ export const sowOps = {
       sow.project_notes,
       sow.deliverables,
       sow.content,
-      sow.created_by || null
+      sow.created_by || null,
+      sow.assumption_set_ids || null,
+      sow.out_of_scope_set_ids || null
     );
     return result.lastInsertRowid;
   },
@@ -912,6 +972,145 @@ export const dashboardOps = {
     `);
     return stmt.all();
   },
+};
+
+// Scope item operations (assumptions and out-of-scope master items)
+export const scopeItemOps = {
+  getAll: (category, filter = 'active') => {
+    // Conditions are applied on scope_items alone (inner subquery) to avoid
+    // ambiguous column names when JOIN-ing with users (which also has is_active).
+    let conditions = [];
+    if (category) conditions.push(`category = '${category}'`);
+    if (filter === 'active') conditions.push('is_active = 1');
+    else if (filter === 'inactive') conditions.push('is_active = 0');
+    const innerWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const stmt = db.prepare(`
+      SELECT si.*, u.display_name as created_by_display_name
+      FROM (SELECT * FROM scope_items ${innerWhere}) si
+      LEFT JOIN users u ON si.created_by = u.id
+      ORDER BY si.created_at DESC
+    `);
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const stmt = db.prepare('SELECT * FROM scope_items WHERE id = ?');
+    return stmt.get(id);
+  },
+
+  create: (item) => {
+    const stmt = db.prepare(`INSERT INTO scope_items (text, category, created_by) VALUES (?, ?, ?)`);
+    const result = stmt.run(item.text, item.category, item.created_by || null);
+    return result.lastInsertRowid;
+  },
+
+  update: (id, item) => {
+    const stmt = db.prepare(`UPDATE scope_items SET text = ? WHERE id = ? AND is_active = 1`);
+    stmt.run(item.text, id);
+  },
+
+  deactivate: (id) => {
+    db.prepare(`UPDATE scope_items SET is_active = 0 WHERE id = ?`).run(id);
+  },
+
+  reactivate: (id) => {
+    db.prepare(`UPDATE scope_items SET is_active = 1 WHERE id = ?`).run(id);
+  },
+
+  bulkCreate: (items, category, createdBy) => {
+    const stmt = db.prepare(`INSERT INTO scope_items (text, category, created_by) VALUES (?, ?, ?)`);
+    const insertMany = db.transaction((rows) => {
+      for (const row of rows) {
+        stmt.run(row.text, category, createdBy || null);
+      }
+    });
+    insertMany(items);
+  }
+};
+
+// Scope set operations
+export const scopeSetOps = {
+  getAll: (category, filter = 'active') => {
+    let conditions = [];
+    if (category) conditions.push(`ss.category = '${category}'`);
+    if (filter === 'active') conditions.push('ss.is_active = 1');
+    else if (filter === 'inactive') conditions.push('ss.is_active = 0');
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const stmt = db.prepare(`
+      SELECT ss.*, u.display_name as created_by_display_name,
+             COUNT(ssi.id) as item_count
+      FROM scope_sets ss
+      LEFT JOIN users u ON ss.created_by = u.id
+      LEFT JOIN scope_set_items ssi ON ss.id = ssi.set_id
+      ${where}
+      GROUP BY ss.id
+      ORDER BY ss.created_at DESC
+    `);
+    return stmt.all();
+  },
+
+  getById: (id) => {
+    const set = db.prepare(`
+      SELECT ss.*, u.display_name as created_by_display_name
+      FROM scope_sets ss
+      LEFT JOIN users u ON ss.created_by = u.id
+      WHERE ss.id = ?
+    `).get(id);
+    if (!set) return null;
+    const items = db.prepare(`
+      SELECT si.*, ssi.order_index
+      FROM scope_set_items ssi
+      JOIN scope_items si ON ssi.item_id = si.id
+      WHERE ssi.set_id = ?
+      ORDER BY ssi.order_index ASC, ssi.id ASC
+    `).all(id);
+    return { ...set, items };
+  },
+
+  create: (scopeSet) => {
+    const stmt = db.prepare(`INSERT INTO scope_sets (name, category, description, created_by) VALUES (?, ?, ?, ?)`);
+    const result = stmt.run(scopeSet.name, scopeSet.category, scopeSet.description || null, scopeSet.created_by || null);
+    return result.lastInsertRowid;
+  },
+
+  update: (id, scopeSet) => {
+    db.prepare(`UPDATE scope_sets SET name = ?, description = ? WHERE id = ? AND is_locked = 0`).run(
+      scopeSet.name, scopeSet.description || null, id
+    );
+  },
+
+  lock: (id) => {
+    db.prepare(`UPDATE scope_sets SET is_locked = 1 WHERE id = ?`).run(id);
+  },
+
+  lockMany: (ids) => {
+    const stmt = db.prepare(`UPDATE scope_sets SET is_locked = 1 WHERE id = ?`);
+    const lockAll = db.transaction((idList) => {
+      for (const id of idList) stmt.run(id);
+    });
+    lockAll(ids);
+  },
+
+  deactivate: (id) => {
+    db.prepare(`UPDATE scope_sets SET is_active = 0 WHERE id = ?`).run(id);
+  },
+
+  reactivate: (id) => {
+    db.prepare(`UPDATE scope_sets SET is_active = 1 WHERE id = ?`).run(id);
+  },
+
+  addItem: (setId, itemId, orderIndex) => {
+    // Check if already in set
+    const existing = db.prepare(`SELECT id FROM scope_set_items WHERE set_id = ? AND item_id = ?`).get(setId, itemId);
+    if (existing) return;
+    const maxOrder = db.prepare(`SELECT COALESCE(MAX(order_index), -1) as max FROM scope_set_items WHERE set_id = ?`).get(setId);
+    const order = orderIndex !== undefined ? orderIndex : maxOrder.max + 1;
+    db.prepare(`INSERT INTO scope_set_items (set_id, item_id, order_index) VALUES (?, ?, ?)`).run(setId, itemId, order);
+  },
+
+  removeItem: (setId, itemId) => {
+    db.prepare(`DELETE FROM scope_set_items WHERE set_id = ? AND item_id = ?`).run(setId, itemId);
+  }
 };
 
 export default db;
