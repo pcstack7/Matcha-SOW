@@ -9,6 +9,7 @@ import UserManagement from './components/UserManagement';
 import UploadedSOWManagement from './components/UploadedSOWManagement';
 import Dashboard from './components/Dashboard';
 import ChangePassword from './components/ChangePassword';
+import ScopeManagement from './components/ScopeManagement';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -84,6 +85,8 @@ function App() {
         return <UserManagement />;
       case 'change-password':
         return <ChangePassword />;
+      case 'scope-management':
+        return <ScopeManagement />;
       default:
         return <SOWGenerator />;
     }
@@ -178,20 +181,28 @@ function App() {
           >
             Manage Templates
           </div>
+          {user.role === 'admin' && (
+            <>
+              <div
+                className={`nav-item ${activeView === 'scope-management' ? 'active' : ''}`}
+                onClick={() => setActiveView('scope-management')}
+              >
+                Scope Management
+              </div>
+              <div
+                className={`nav-item ${activeView === 'users' ? 'active' : ''}`}
+                onClick={() => setActiveView('users')}
+              >
+                Manage Users
+              </div>
+            </>
+          )}
           <div
             className={`nav-item ${activeView === 'change-password' ? 'active' : ''}`}
             onClick={() => setActiveView('change-password')}
           >
             Change Password
           </div>
-          {user.role === 'admin' && (
-            <div
-              className={`nav-item ${activeView === 'users' ? 'active' : ''}`}
-              onClick={() => setActiveView('users')}
-            >
-              Manage Users
-            </div>
-          )}
         </nav>
 
         <div className="sidebar-footer">

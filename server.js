@@ -11,7 +11,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps } from "./database.js";
 import passport from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -19,7 +19,9 @@ import mammoth from "mammoth";
 
 // Import CommonJS modules using createRequire
 const require = createRequire(import.meta.url);
-const pdfParse = require("pdf-parse");
+// pdf-parse v2 uses a class-based API: new PDFParse({ data: buffer }).getText()
+const { PDFParse } = require("pdf-parse");
+const XLSX = require("xlsx");
 
 dotenv.config();
 
@@ -124,6 +126,8 @@ const WORKSPACE_ID = process.env.WORKSPACE_ID || 2010;
 const BASE_URL = process.env.BASE_URL || "https://matcha.harriscomputer.com/rest/api/v1";
 const MISSION_ID = process.env.MISSION_ID || 7618;
 const FOLDER_ID = process.env.FOLDER_ID || 10917; // Matcha folder for SOW uploads
+const EXTRACTION_MISSION_ID = process.env.EXTRACTION_MISSION_ID; // Dedicated mission for document extraction
+const EXTRACTION_FOLDER_ID = process.env.EXTRACTION_FOLDER_ID; // Folder inside extraction mission
 
 if (!API_KEY) {
   console.error("❌ MATCHA_API_KEY is missing in .env file.");
@@ -136,6 +140,59 @@ if (!fs.existsSync(sowUploadDir)) {
   fs.mkdirSync(sowUploadDir, { recursive: true });
   console.log('✓ Created directory: uploads/sow-bank');
 }
+
+// Configure multer for document extraction uploads (temp storage)
+const extractionStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, 'uploads', 'extraction-temp');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  },
+});
+
+const extractionUpload = multer({
+  storage: extractionStorage,
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.pdf', '.docx', '.txt', '.xlsx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed: PDF, DOCX, TXT, XLSX'));
+    }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+});
+
+// Configure multer for Excel import of scope items
+const excelStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, 'uploads', 'excel-temp');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  },
+});
+
+const excelUpload = multer({
+  storage: excelStorage,
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.xlsx' || ext === '.xls') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only Excel files (.xlsx, .xls) are allowed'));
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 // ============================================
 // AUTHENTICATION ENDPOINTS
@@ -958,7 +1015,9 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
         // Extract text from PDF with structure preservation
         try {
           const dataBuffer = fs.readFileSync(template.file_path);
-          const pdfData = await pdfParse(dataBuffer);
+          const pdfParser = new PDFParse({ data: dataBuffer });
+          const pdfData = await pdfParser.getText();
+          await pdfParser.destroy();
           content = pdfData.text;
           contentType = "text";
         } catch (pdfErr) {
@@ -1036,10 +1095,114 @@ app.get("/api/sows/account/:accountId", isAuthenticated, (req, res) => {
   }
 });
 
+// ─── SOW post-processing helpers ─────────────────────────────────────────────
+
+/**
+ * After Matcha returns the SOW text, this function guarantees that the
+ * Assumptions and Out of Scope sections contain exactly the curated items —
+ * verbatim, in the right order — regardless of what Matcha produced.
+ *
+ * Strategy:
+ *  • If Matcha created the section → replace its body with our exact bullets.
+ *  • If Matcha omitted the section  → insert it before "Terms and Conditions"
+ *    (or before "Acceptance Criteria", or append at the very end as fallback).
+ */
+function postProcessSOW(content, assumptionItems, outOfScopeItems) {
+  let result = content;
+
+  if (assumptionItems.length > 0) {
+    result = replaceOrInsertSection(
+      result,
+      ['assumptions'],
+      assumptionItems,
+      'Assumptions',
+      // Try to insert before one of these if the section is missing
+      ['out of scope', 'out-of-scope', 'exclusions', 'terms and conditions', 'acceptance criteria', 'payment terms', 'signatures', 'appendix']
+    );
+  }
+
+  if (outOfScopeItems.length > 0) {
+    result = replaceOrInsertSection(
+      result,
+      ['out of scope', 'out-of-scope', 'exclusions', 'excluded items', 'not in scope'],
+      outOfScopeItems,
+      'Out of Scope',
+      ['terms and conditions', 'acceptance criteria', 'payment terms', 'signatures', 'appendix']
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Locates a section in `content` whose heading matches any of `aliases`
+ * (case-insensitive; handles #/## headings, **bold**, plain text with colon).
+ * Replaces everything between that heading and the next heading with `items`
+ * formatted as a bullet list.
+ * If the section is not found, inserts it before the first `insertBeforeAliases`
+ * anchor found, or appends at the end.
+ */
+function replaceOrInsertSection(content, aliases, items, canonicalTitle, insertBeforeAliases) {
+  const bulletList = items.map(i => `- ${i}`).join('\n');
+
+  // Build a regex that matches a heading line for any of the aliases.
+  // Covers:  ## Assumptions  |  **Assumptions**  |  **Assumptions:**  |  Assumptions:
+  const aliasOr = aliases
+    .map(a => a.replace(/[-\s]/g, '[\\s\\-]?'))
+    .join('|');
+  const headerRe = new RegExp(
+    `^(#{1,6}[ \\t]+|\\*{1,2}|[ \\t]*)(?:${aliasOr})[ \\t]*\\*{0,2}:?[ \\t]*$`,
+    'im'
+  );
+
+  const headerMatch = content.match(headerRe);
+
+  if (headerMatch) {
+    // ── Section found: replace its body ──────────────────────────────────────
+    const headerLine  = headerMatch[0];
+    const headerIdx   = headerMatch.index;
+    const afterHeader = content.slice(headerIdx + headerLine.length);
+
+    // Detect the start of the next section (any markdown heading or **bold** heading)
+    const nextRe    = /^(#{1,6}[ \t]+\S|\*{2}\S|_{2}\S)/m;
+    const nextMatch = afterHeader.match(nextRe);
+
+    const before = content.slice(0, headerIdx + headerLine.length);
+    if (nextMatch) {
+      const after = afterHeader.slice(nextMatch.index);
+      return `${before}\n\n${bulletList}\n\n${after}`;
+    } else {
+      return `${before}\n\n${bulletList}\n`;
+    }
+  } else {
+    // ── Section missing: insert before the first recognised anchor ───────────
+    for (const anchor of insertBeforeAliases) {
+      const anchorOr = anchor.replace(/[-\s]/g, '[\\s\\-]?');
+      const anchorRe = new RegExp(
+        `^(#{1,6}[ \\t]+|\\*{1,2}|[ \\t]*)(?:${anchorOr})[ \\t]*\\*{0,2}:?[ \\t]*$`,
+        'im'
+      );
+      const anchorMatch = content.match(anchorRe);
+      if (anchorMatch) {
+        const insertAt = anchorMatch.index;
+        return (
+          content.slice(0, insertAt) +
+          `## ${canonicalTitle}\n\n${bulletList}\n\n` +
+          content.slice(insertAt)
+        );
+      }
+    }
+    // Last resort: append
+    return `${content}\n\n## ${canonicalTitle}\n\n${bulletList}\n`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Generate SOW using AI
 app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
   try {
-    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables } = req.body;
+    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, assumption_set_ids, out_of_scope_set_ids } = req.body;
 
     if (!account_id || !project_notes || !deliverables) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -1064,7 +1227,63 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
       }
     }
 
+    // Build assumption/out-of-scope sections from selected sets.
+    // rawAssumptionItems / rawOutOfScopeItems are plain text arrays used by
+    // postProcessSOW() to guarantee verbatim content in the final document.
+    let assumptionSection = "";
+    let outOfScopeSection = "";
+    const rawAssumptionItems = [];  // plain text, no bullet prefix
+    const rawOutOfScopeItems = [];  // plain text, no bullet prefix
+
+    const parsedAssumptionSetIds = Array.isArray(assumption_set_ids)
+      ? assumption_set_ids.map(Number).filter(Boolean)
+      : [];
+    const parsedOutOfScopeSetIds = Array.isArray(out_of_scope_set_ids)
+      ? out_of_scope_set_ids.map(Number).filter(Boolean)
+      : [];
+
+    if (parsedAssumptionSetIds.length > 0) {
+      const assumptionLines = [];
+      for (const setId of parsedAssumptionSetIds) {
+        const scopeSet = scopeSetOps.getById(setId);
+        if (scopeSet && scopeSet.items && scopeSet.items.length > 0) {
+          assumptionLines.push(`[${scopeSet.name}]`);
+          scopeSet.items.forEach(item => {
+            assumptionLines.push(`- ${item.text}`);
+            rawAssumptionItems.push(item.text);
+          });
+        }
+      }
+      if (assumptionLines.length > 0) {
+        assumptionSection = `\n\nAssumptions:\n${assumptionLines.join('\n')}`;
+      }
+    }
+
+    if (parsedOutOfScopeSetIds.length > 0) {
+      const outOfScopeLines = [];
+      for (const setId of parsedOutOfScopeSetIds) {
+        const scopeSet = scopeSetOps.getById(setId);
+        if (scopeSet && scopeSet.items && scopeSet.items.length > 0) {
+          outOfScopeLines.push(`[${scopeSet.name}]`);
+          scopeSet.items.forEach(item => {
+            outOfScopeLines.push(`- ${item.text}`);
+            rawOutOfScopeItems.push(item.text);
+          });
+        }
+      }
+      if (outOfScopeLines.length > 0) {
+        outOfScopeSection = `\n\nOut of Scope:\n${outOfScopeLines.join('\n')}`;
+      }
+    }
+
     // Build the AI prompt
+    const assumptionInstruction = rawAssumptionItems.length > 0
+      ? `\n- Assumptions (include a section with the EXACT heading "## Assumptions" containing the provided items verbatim)`
+      : "";
+    const outOfScopeInstruction = rawOutOfScopeItems.length > 0
+      ? `\n- Out of Scope (include a section with the EXACT heading "## Out of Scope" containing the provided items verbatim)`
+      : "";
+
     const prompt = `Generate a professional Statement of Work (SOW) document with the following details:
 
 Account: ${account.name}${account.account_contact ? ` (Contact: ${account.account_contact})` : ""}
@@ -1076,7 +1295,7 @@ Project Notes:
 ${project_notes}
 
 Deliverables:
-${deliverables}${templateContent}
+${deliverables}${assumptionSection}${outOfScopeSection}${templateContent}
 
 Please generate a complete, professional SOW document with appropriate sections including:
 - Executive Summary
@@ -1084,7 +1303,12 @@ Please generate a complete, professional SOW document with appropriate sections 
 - Deliverables
 - Timeline
 - Terms and Conditions
-- Acceptance Criteria
+- Acceptance Criteria${assumptionInstruction}${outOfScopeInstruction}
+
+IMPORTANT FORMATTING RULES:
+- Use markdown headings (## Section Title) for all top-level sections.
+- If Assumptions are provided, place them under the exact heading "## Assumptions" and copy each item exactly as given — do not paraphrase or reorder.
+- If Out of Scope items are provided, place them under the exact heading "## Out of Scope" and copy each item exactly as given — do not paraphrase or reorder.${templateName ? `\n- Adhere to the structure and tone of the "${templateName}" template where possible.` : ""}
 
 Format the output as a well-structured document with clear section headers and subheaders.`;
 
@@ -1109,8 +1333,15 @@ Format the output as a well-structured document with clear section headers and s
 
     const data = await response.json();
     const contentBlock = data?.output?.[0]?.content?.find(c => c.type === 'output_text') || data?.output?.[0]?.content?.[0];
-    const content = contentBlock?.text || "No response generated.";
+    const rawContent = contentBlock?.text || "No response generated.";
 
+    // Post-process: guarantee Assumptions and Out of Scope sections contain
+    // the exact curated items verbatim, regardless of what Matcha produced.
+    const content = postProcessSOW(rawContent, rawAssumptionItems, rawOutOfScopeItems);
+
+    if (rawAssumptionItems.length > 0 || rawOutOfScopeItems.length > 0) {
+      console.log(`✅ SOW post-processed: ${rawAssumptionItems.length} assumption(s), ${rawOutOfScopeItems.length} out-of-scope item(s) injected verbatim.`);
+    }
 
     // Save SOW to database with user tracking
     const id = sowOps.create({
@@ -1121,8 +1352,16 @@ Format the output as a well-structured document with clear section headers and s
       project_notes,
       deliverables,
       content,
-      created_by: req.user.id, // Current authenticated user
+      created_by: req.user.id,
+      assumption_set_ids: parsedAssumptionSetIds.length > 0 ? JSON.stringify(parsedAssumptionSetIds) : null,
+      out_of_scope_set_ids: parsedOutOfScopeSetIds.length > 0 ? JSON.stringify(parsedOutOfScopeSetIds) : null,
     });
+
+    // Auto-lock all referenced scope sets
+    const allSetIds = [...parsedAssumptionSetIds, ...parsedOutOfScopeSetIds];
+    if (allSetIds.length > 0) {
+      scopeSetOps.lockMany(allSetIds);
+    }
 
     const sow = sowOps.getById(id);
     res.status(201).json(sow);
@@ -1766,6 +2005,379 @@ app.post("/chat", async (req, res) => {
   } catch (err) {
     console.error("⚠️ Error calling Matcha API:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ============================================
+// SCOPE ITEMS ENDPOINTS (Assumptions & Out of Scope master items)
+// ============================================
+
+// Get all scope items (optionally filtered by category and active status)
+app.get("/api/scope-items", isAuthenticated, (req, res) => {
+  try {
+    const { category, filter } = req.query;
+    const items = scopeItemOps.getAll(category, filter || 'active');
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching scope items:", err);
+    res.status(500).json({ error: "Failed to fetch scope items" });
+  }
+});
+
+// Create scope item (admin only)
+app.post("/api/scope-items", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const { text, category } = req.body;
+    if (!text || !category) {
+      return res.status(400).json({ error: "text and category are required" });
+    }
+    if (!['assumption', 'out_of_scope'].includes(category)) {
+      return res.status(400).json({ error: "category must be 'assumption' or 'out_of_scope'" });
+    }
+    const id = scopeItemOps.create({ text, category, created_by: req.user.id });
+    res.status(201).json(scopeItemOps.getById(id));
+  } catch (err) {
+    console.error("Error creating scope item:", err);
+    res.status(500).json({ error: "Failed to create scope item" });
+  }
+});
+
+// Update scope item (admin only)
+app.put("/api/scope-items/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const item = scopeItemOps.getById(req.params.id);
+    if (!item) return res.status(404).json({ error: "Scope item not found" });
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "text is required" });
+    scopeItemOps.update(req.params.id, { text });
+    res.json(scopeItemOps.getById(req.params.id));
+  } catch (err) {
+    console.error("Error updating scope item:", err);
+    res.status(500).json({ error: "Failed to update scope item" });
+  }
+});
+
+// Deactivate scope item (admin only)
+app.patch("/api/scope-items/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    scopeItemOps.deactivate(req.params.id);
+    res.json({ message: "Scope item deactivated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to deactivate scope item" });
+  }
+});
+
+// Reactivate scope item (admin only)
+app.patch("/api/scope-items/:id/reactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    scopeItemOps.reactivate(req.params.id);
+    res.json({ message: "Scope item reactivated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to reactivate scope item" });
+  }
+});
+
+// Import scope items from Excel (admin only)
+app.post("/api/scope-items/import-excel", isAuthenticated, requireAdmin, excelUpload.single("file"), async (req, res) => {
+  try {
+    const { category } = req.body;
+    if (!category || !['assumption', 'out_of_scope'].includes(category)) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "category must be 'assumption' or 'out_of_scope'" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    // Skip header row (index 0), read first column of remaining rows
+    const items = rows.slice(1)
+      .map(row => ({ text: (row[0] || '').toString().trim() }))
+      .filter(item => item.text.length > 0);
+
+    if (items.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "No valid items found in the Excel file" });
+    }
+
+    scopeItemOps.bulkCreate(items, category, req.user.id);
+    fs.unlinkSync(req.file.path);
+
+    res.status(201).json({ message: `Imported ${items.length} items successfully`, count: items.length });
+  } catch (err) {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    console.error("Error importing Excel:", err);
+    res.status(500).json({ error: "Failed to import Excel file" });
+  }
+});
+
+// ============================================
+// SCOPE SETS ENDPOINTS
+// ============================================
+
+// Get all scope sets
+app.get("/api/scope-sets", isAuthenticated, (req, res) => {
+  try {
+    const { category, filter } = req.query;
+    const sets = scopeSetOps.getAll(category, filter || 'active');
+    res.json(sets);
+  } catch (err) {
+    console.error("Error fetching scope sets:", err);
+    res.status(500).json({ error: "Failed to fetch scope sets" });
+  }
+});
+
+// Get scope set by ID (includes items)
+app.get("/api/scope-sets/:id", isAuthenticated, (req, res) => {
+  try {
+    const scopeSet = scopeSetOps.getById(req.params.id);
+    if (!scopeSet) return res.status(404).json({ error: "Scope set not found" });
+    res.json(scopeSet);
+  } catch (err) {
+    console.error("Error fetching scope set:", err);
+    res.status(500).json({ error: "Failed to fetch scope set" });
+  }
+});
+
+// Create scope set (admin only)
+app.post("/api/scope-sets", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const { name, category, description } = req.body;
+    if (!name || !category) {
+      return res.status(400).json({ error: "name and category are required" });
+    }
+    if (!['assumption', 'out_of_scope'].includes(category)) {
+      return res.status(400).json({ error: "category must be 'assumption' or 'out_of_scope'" });
+    }
+    const id = scopeSetOps.create({ name, category, description, created_by: req.user.id });
+    res.status(201).json(scopeSetOps.getById(id));
+  } catch (err) {
+    console.error("Error creating scope set:", err);
+    res.status(500).json({ error: "Failed to create scope set" });
+  }
+});
+
+// Update scope set (admin only, blocked if locked)
+app.put("/api/scope-sets/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const scopeSet = scopeSetOps.getById(req.params.id);
+    if (!scopeSet) return res.status(404).json({ error: "Scope set not found" });
+    if (scopeSet.is_locked) {
+      return res.status(403).json({ error: "This set is locked and cannot be edited. It has been used in a generated SOW." });
+    }
+    const { name, description } = req.body;
+    if (!name) return res.status(400).json({ error: "name is required" });
+    scopeSetOps.update(req.params.id, { name, description });
+    res.json(scopeSetOps.getById(req.params.id));
+  } catch (err) {
+    console.error("Error updating scope set:", err);
+    res.status(500).json({ error: "Failed to update scope set" });
+  }
+});
+
+// Deactivate scope set (admin only)
+app.patch("/api/scope-sets/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    scopeSetOps.deactivate(req.params.id);
+    res.json({ message: "Scope set deactivated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to deactivate scope set" });
+  }
+});
+
+// Reactivate scope set (admin only)
+app.patch("/api/scope-sets/:id/reactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    scopeSetOps.reactivate(req.params.id);
+    res.json({ message: "Scope set reactivated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to reactivate scope set" });
+  }
+});
+
+// Add item to scope set (admin only, blocked if locked)
+app.post("/api/scope-sets/:id/items", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const scopeSet = scopeSetOps.getById(req.params.id);
+    if (!scopeSet) return res.status(404).json({ error: "Scope set not found" });
+    if (scopeSet.is_locked) {
+      return res.status(403).json({ error: "This set is locked and cannot be modified." });
+    }
+    const { item_id } = req.body;
+    if (!item_id) return res.status(400).json({ error: "item_id is required" });
+    scopeSetOps.addItem(req.params.id, item_id);
+    res.json(scopeSetOps.getById(req.params.id));
+  } catch (err) {
+    console.error("Error adding item to scope set:", err);
+    res.status(500).json({ error: "Failed to add item to scope set" });
+  }
+});
+
+// Remove item from scope set (admin only, blocked if locked)
+app.delete("/api/scope-sets/:id/items/:itemId", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const scopeSet = scopeSetOps.getById(req.params.id);
+    if (!scopeSet) return res.status(404).json({ error: "Scope set not found" });
+    if (scopeSet.is_locked) {
+      return res.status(403).json({ error: "This set is locked and cannot be modified." });
+    }
+    scopeSetOps.removeItem(req.params.id, req.params.itemId);
+    res.json(scopeSetOps.getById(req.params.id));
+  } catch (err) {
+    console.error("Error removing item from scope set:", err);
+    res.status(500).json({ error: "Failed to remove item from scope set" });
+  }
+});
+
+// ============================================
+// DOCUMENT INTELLIGENCE: Extract from Documents
+// ============================================
+
+app.post("/api/sows/extract-from-documents", isAuthenticated, extractionUpload.array("files", 5), async (req, res) => {
+  const localFilePaths = (req.files || []).map(f => f.path);
+
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded" });
+    }
+
+    if (!EXTRACTION_MISSION_ID) {
+      localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+      return res.status(503).json({ error: "Document extraction is not configured. Set EXTRACTION_MISSION_ID in environment variables." });
+    }
+
+    // ── Step 1: Extract text from each file locally ───────────────────────────
+    // Uses mammoth (DOCX), pdf-parse (PDF), fs (TXT), XLSX (spreadsheets).
+    // All three libraries are already imported at the top of this file.
+    // This avoids uploading to Matcha and waiting for indexing before the
+    // completions call — a freshly uploaded file has no vector index yet,
+    // which caused the "No document was provided" response.
+    const extractedTexts = [];
+    const processedFileNames = [];
+
+    for (const file of req.files) {
+      try {
+        let text = '';
+        const name = file.originalname.toLowerCase();
+
+        if (name.endsWith('.pdf')) {
+          const pdfParser = new PDFParse({ data: fs.readFileSync(file.path) });
+          const pdfData = await pdfParser.getText();
+          await pdfParser.destroy();
+          text = pdfData.text || '';
+        } else if (name.endsWith('.docx')) {
+          const result = await mammoth.extractRawText({ path: file.path });
+          text = result.value || '';
+        } else if (name.endsWith('.txt')) {
+          text = fs.readFileSync(file.path, 'utf8');
+        } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+          const wb = XLSX.readFile(file.path);
+          text = wb.SheetNames
+            .map(sheetName => XLSX.utils.sheet_to_txt(wb.Sheets[sheetName]))
+            .join('\n\n');
+        }
+
+        if (text.trim()) {
+          // Cap per-file at 80,000 chars to stay within Matcha's context window
+          const capped = text.length > 80000
+            ? text.slice(0, 80000) + '\n[... content truncated due to length ...]'
+            : text;
+          extractedTexts.push(`--- ${file.originalname} ---\n${capped}`);
+          processedFileNames.push(file.originalname);
+          console.log(`✅ Extracted ${text.length} chars from ${file.originalname}`);
+        } else {
+          console.warn(`⚠️  No text extracted from ${file.originalname}`);
+        }
+      } catch (fileErr) {
+        console.error(`Error extracting text from ${file.originalname}:`, fileErr);
+      }
+    }
+
+    // Clean up local temp files now that text is extracted
+    localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+
+    if (extractedTexts.length === 0) {
+      return res.status(422).json({ error: "Could not extract readable text from any of the uploaded files. Please check the files are not scanned images or password-protected." });
+    }
+
+    // ── Step 2: Single Matcha completions call with text as context ───────────
+    // Using mission_id ensures the extraction persona is applied.
+    // Passing extracted text as `context` with llmChatOnly:true means the LLM
+    // reads exactly what we provide — no vector search, no indexing delay.
+    const combinedContext = 'DOCUMENT CONTENT:\n\n' + extractedTexts.join('\n\n');
+
+    const extractionPrompt = `Analyze the document content provided in the context and extract the following information for a software implementation Statement of Work:
+
+1. PROJECT NOTES: The project scope, objectives, background, requirements, constraints, timeline context, and any specific technical or business details relevant to a software implementation project.
+2. DELIVERABLES: A clear, itemized list of specific deliverables, outputs, milestones, and acceptance criteria mentioned or implied in the document.
+
+Return ONLY a JSON object in this exact format:
+{
+  "project_notes": "extracted project notes here",
+  "deliverables": "extracted deliverables here as a numbered or bulleted list"
+}
+
+Do not include any explanation, markdown fences, or text outside the JSON object.`;
+
+    const completionBody = {
+      mission_id: parseInt(EXTRACTION_MISSION_ID),
+      input: extractionPrompt,
+      context: combinedContext,
+      options: { llmChatOnly: true },
+    };
+
+    const completionResponse = await fetch(`${BASE_URL}/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'MATCHA-API-KEY': API_KEY,
+      },
+      body: JSON.stringify(completionBody),
+    });
+
+    if (!completionResponse.ok) {
+      const errText = await completionResponse.text();
+      console.error('Matcha extraction completions error:', errText);
+      return res.status(completionResponse.status).json({ error: "Matcha extraction call failed. Please try again." });
+    }
+
+    // ── Step 3: Parse the response ────────────────────────────────────────────
+    const completionData = await completionResponse.json();
+    const textBlock = completionData?.output?.[0]?.content?.find(c => c.type === 'output_text')
+                   || completionData?.output?.[0]?.content?.[0];
+    const rawText = textBlock?.text || '';
+
+    let projectNotes = '';
+    let deliverables = '';
+
+    try {
+      // Strip markdown code fences if Matcha wrapped the JSON
+      const cleaned = rawText.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      projectNotes = parsed.project_notes || '';
+      deliverables = parsed.deliverables || '';
+    } catch (parseErr) {
+      // If not valid JSON, surface the raw text so the user still gets something
+      console.warn('Could not parse extraction response as JSON — returning raw text');
+      projectNotes = rawText;
+      deliverables = '';
+    }
+
+    res.json({
+      project_notes: projectNotes,
+      deliverables: deliverables,
+      files_processed: processedFileNames,
+    });
+
+  } catch (err) {
+    // Ensure local files are cleaned up on unexpected error
+    localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    console.error("Error extracting from documents:", err);
+    res.status(500).json({ error: "Failed to extract content from documents" });
   }
 });
 

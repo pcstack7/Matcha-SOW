@@ -129,6 +129,167 @@ export const sowApi = {
   },
 };
 
+// Scope Items API (Assumptions & Out of Scope master items)
+export const scopeItemApi = {
+  getAll: async (category, filter = 'active') => {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    params.set('filter', filter);
+    const response = await fetchWithAuth(`${API_BASE}/scope-items?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch scope items');
+    return response.json();
+  },
+
+  create: async (item) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to create scope item');
+    }
+    return response.json();
+  },
+
+  update: async (id, item) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-items/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    });
+    if (!response.ok) throw new Error('Failed to update scope item');
+    return response.json();
+  },
+
+  deactivate: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-items/${id}/deactivate`, { method: 'PATCH' });
+    if (!response.ok) throw new Error('Failed to deactivate scope item');
+    return response.json();
+  },
+
+  reactivate: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-items/${id}/reactivate`, { method: 'PATCH' });
+    if (!response.ok) throw new Error('Failed to reactivate scope item');
+    return response.json();
+  },
+
+  importExcel: async (file, category) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category);
+    const response = await fetchWithAuth(`${API_BASE}/scope-items/import-excel`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to import Excel file');
+    }
+    return response.json();
+  },
+};
+
+// Scope Sets API
+export const scopeSetApi = {
+  getAll: async (category, filter = 'active') => {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    params.set('filter', filter);
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch scope sets');
+    return response.json();
+  },
+
+  getById: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${id}`);
+    if (!response.ok) throw new Error('Failed to fetch scope set');
+    return response.json();
+  },
+
+  create: async (scopeSet) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scopeSet),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to create scope set');
+    }
+    return response.json();
+  },
+
+  update: async (id, scopeSet) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scopeSet),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to update scope set');
+    }
+    return response.json();
+  },
+
+  deactivate: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${id}/deactivate`, { method: 'PATCH' });
+    if (!response.ok) throw new Error('Failed to deactivate scope set');
+    return response.json();
+  },
+
+  reactivate: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${id}/reactivate`, { method: 'PATCH' });
+    if (!response.ok) throw new Error('Failed to reactivate scope set');
+    return response.json();
+  },
+
+  addItem: async (setId, itemId) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${setId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId }),
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to add item to scope set');
+    }
+    return response.json();
+  },
+
+  removeItem: async (setId, itemId) => {
+    const response = await fetchWithAuth(`${API_BASE}/scope-sets/${setId}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to remove item from scope set');
+    }
+    return response.json();
+  },
+};
+
+// Document extraction API
+export const extractionApi = {
+  extractFromDocuments: async (files) => {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    const response = await fetchWithAuth(`${API_BASE}/sows/extract-from-documents`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to extract content from documents');
+    }
+    return response.json();
+  },
+};
+
 // Export API
 export const exportApi = {
   downloadPdf: async (id) => {
