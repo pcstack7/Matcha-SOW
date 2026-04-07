@@ -239,6 +239,7 @@ function UserManagement() {
                   <th>Email</th>
                   <th>Display Name</th>
                   <th>Role</th>
+                  <th>Provider</th>
                   <th>Status</th>
                   <th>Last Login</th>
                   <th>Actions</th>
@@ -253,6 +254,11 @@ function UserManagement() {
                     <td>
                       <span className={`badge badge-${user.role === 'admin' ? 'primary' : 'secondary'}`}>
                         {user.role}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge badge-${user.auth_provider === 'azure' ? 'info' : 'secondary'}`}>
+                        {user.auth_provider === 'azure' ? 'SSO' : 'Local'}
                       </span>
                     </td>
                     <td>
@@ -272,6 +278,9 @@ function UserManagement() {
                         <button
                           className="btn btn-small btn-outline"
                           onClick={() => handleOpenPasswordModal(user.id)}
+                          disabled={user.auth_provider === 'azure'}
+                          title={user.auth_provider === 'azure' ? 'Password is managed by Microsoft' : 'Change password'}
+                          style={user.auth_provider === 'azure' ? { opacity: 0.45, cursor: 'not-allowed' } : {}}
                         >
                           Change Password
                         </button>

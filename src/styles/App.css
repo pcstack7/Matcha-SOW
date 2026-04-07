@@ -713,6 +713,28 @@ select.form-control {
   color: var(--primary-white);
 }
 
+.badge-info {
+  background-color: var(--primary-light);
+  color: var(--primary-white);
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0 1rem;
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: #e0e0e0;
+}
+
 /* Form Small Text */
 .form-group small {
   display: block;
