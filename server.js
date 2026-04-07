@@ -297,17 +297,16 @@ app.get("/auth/azure", (req, res, next) => {
   })(req, res, next);
 });
 
-// Azure AD callback — Microsoft POSTs back here after the user authenticates
-// IMPORTANT: Must be app.post because responseMode is 'form_post'
-app.post("/auth/azure/callback", (req, res, next) => {
+// Azure AD callback — Microsoft redirects back here with auth code (responseMode: 'query')
+app.get("/auth/azure/callback", (req, res, next) => {
   passport.authenticate("azuread-openidconnect", (err, user, info) => {
     if (err) {
-      console.error("Azure SSO callback error:", err);
-      return res.redirect("/?sso_error=server_error");
+      console.error("Azure SSO callback error:", JSON.stringify(err, null, 2));
+      return res.redirect(`/?sso_error=${encodeURIComponent(err.message || 'server_error')}`);
     }
     if (!user) {
       const msg = (info && info.message) ? info.message : "Authentication failed";
-      console.warn("Azure SSO login rejected:", msg);
+      console.warn("Azure SSO login rejected — info:", JSON.stringify(info, null, 2));
       return res.redirect(`/?sso_error=${encodeURIComponent(msg)}`);
     }
     req.login(user, (loginErr) => {
@@ -315,6 +314,7 @@ app.post("/auth/azure/callback", (req, res, next) => {
         console.error("Session error after Azure SSO:", loginErr);
         return res.redirect("/?sso_error=session_error");
       }
+      console.log("Azure SSO login successful for user:", user.username, "role:", user.role);
       // Redirect to SPA root — React's checkAuthStatus() picks up the session
       return res.redirect("/");
     });
