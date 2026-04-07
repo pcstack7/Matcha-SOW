@@ -65,7 +65,7 @@ if (azureConfigured) {
         responseType: 'code',
         responseMode: 'form_post',
         redirectUrl: process.env.AZURE_REDIRECT_URI,
-        allowHttpForRedirectUrl: process.env.NODE_ENV !== 'production',
+        allowHttpForRedirectUrl: !process.env.AZURE_REDIRECT_URI?.startsWith('https://'),
         scope: ['openid', 'profile', 'email'],
         passReqToCallback: false,
         loggingLevel: 'warn',
