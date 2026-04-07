@@ -328,6 +328,11 @@ export const userOps = {
     stmt.run(id);
   },
 
+  updateRole: (id, role) => {
+    const stmt = db.prepare('UPDATE users SET role = ? WHERE id = ?');
+    stmt.run(role, id);
+  },
+
   delete: (id) => {
     const stmt = db.prepare('DELETE FROM users WHERE id = ?');
     stmt.run(id);

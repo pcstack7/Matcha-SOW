@@ -1,10 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [ssoAvailable, setSsoAvailable] = useState(false);
+
+  useEffect(() => {
+    // Check if Azure SSO is configured on the backend
+    fetch('/auth/azure/available')
+      .then((r) => r.json())
+      .then((data) => setSsoAvailable(!!data.available))
+      .catch(() => setSsoAvailable(false));
+
+    // Check if we were redirected back from Azure with an error
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    if (ssoError) {
+      setError(`SSO sign-in failed: ${decodeURIComponent(ssoError)}`);
+      // Clean the query param from the URL without a page reload
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,7 +45,6 @@ function Login({ onLoginSuccess }) {
         throw new Error(data.error || 'Login failed');
       }
 
-      // Login successful
       if (onLoginSuccess) {
         onLoginSuccess(data.user);
       }
@@ -36,6 +53,11 @@ function Login({ onLoginSuccess }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSsoLogin = () => {
+    // Full-page navigation required — OIDC flow involves browser redirects to Microsoft
+    window.location.href = '/auth/azure';
   };
 
   return (
@@ -82,6 +104,23 @@ function Login({ onLoginSuccess }) {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+
+        {ssoAvailable && (
+          <>
+            <div className="login-divider">
+              <span>or</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline btn-block"
+              onClick={handleSsoLogin}
+              disabled={loading}
+            >
+              <span style={{ marginRight: '0.5rem' }}>🏢</span>
+              Sign in with Microsoft (SSO)
+            </button>
+          </>
+        )}
 
         <div className="login-footer">
           <p>Default admin credentials:</p>

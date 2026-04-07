@@ -84,6 +84,7 @@ function App() {
       case 'users':
         return <UserManagement />;
       case 'change-password':
+        if (user?.auth_provider === 'azure') return <SOWGenerator />;
         return <ChangePassword />;
       case 'scope-management':
         return <ScopeManagement />;
@@ -197,12 +198,14 @@ function App() {
               </div>
             </>
           )}
-          <div
-            className={`nav-item ${activeView === 'change-password' ? 'active' : ''}`}
-            onClick={() => setActiveView('change-password')}
-          >
-            Change Password
-          </div>
+          {user?.auth_provider !== 'azure' && (
+            <div
+              className={`nav-item ${activeView === 'change-password' ? 'active' : ''}`}
+              onClick={() => setActiveView('change-password')}
+            >
+              Change Password
+            </div>
+          )}
         </nav>
 
         <div className="sidebar-footer">

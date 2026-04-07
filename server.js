@@ -12,7 +12,7 @@ import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps } from "./database.js";
-import passport from "./auth/passport-config.js";
+import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
 import mammoth from "mammoth";
@@ -278,6 +278,50 @@ app.get("/auth/session", (req, res) => {
 });
 
 // ============================================
+// AZURE AD SSO ENDPOINTS
+// ============================================
+
+// Feature flag — frontend checks this to decide whether to show the SSO button
+app.get("/auth/azure/available", (req, res) => {
+  res.json({ available: !!azureConfigured });
+});
+
+// Initiate Azure AD login — redirects browser to Microsoft login page
+app.get("/auth/azure", (req, res, next) => {
+  if (!azureConfigured) {
+    return res.status(404).json({ error: "Azure SSO is not configured on this server." });
+  }
+  passport.authenticate("azuread-openidconnect", {
+    failureRedirect: "/?sso_error=auth_failed",
+    session: false,
+  })(req, res, next);
+});
+
+// Azure AD callback — Microsoft POSTs back here after the user authenticates
+// IMPORTANT: Must be app.post because responseMode is 'form_post'
+app.post("/auth/azure/callback", (req, res, next) => {
+  passport.authenticate("azuread-openidconnect", (err, user, info) => {
+    if (err) {
+      console.error("Azure SSO callback error:", err);
+      return res.redirect("/?sso_error=server_error");
+    }
+    if (!user) {
+      const msg = (info && info.message) ? info.message : "Authentication failed";
+      console.warn("Azure SSO login rejected:", msg);
+      return res.redirect(`/?sso_error=${encodeURIComponent(msg)}`);
+    }
+    req.login(user, (loginErr) => {
+      if (loginErr) {
+        console.error("Session error after Azure SSO:", loginErr);
+        return res.redirect("/?sso_error=session_error");
+      }
+      // Redirect to SPA root — React's checkAuthStatus() picks up the session
+      return res.redirect("/");
+    });
+  })(req, res, next);
+});
+
+// ============================================
 // USER MANAGEMENT ENDPOINTS (Admin Only)
 // ============================================
 
@@ -400,6 +444,11 @@ app.put("/api/users/:id/password", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    // Cannot set password for Azure AD users — password is managed by Microsoft
+    if (user.auth_provider === 'azure') {
+      return res.status(400).json({ error: "Cannot set password for Azure AD (SSO) users. Their password is managed by Microsoft." });
+    }
+
     const password_hash = await bcrypt.hash(password, 10);
     userOps.updatePassword(req.params.id, password_hash);
 
@@ -426,6 +475,11 @@ app.put("/api/change-password", isAuthenticated, async (req, res) => {
     const user = userOps.getById(req.user.id);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    // Azure AD users manage their password through Microsoft — not through this app
+    if (user.auth_provider === 'azure') {
+      return res.status(403).json({ error: "Password management is handled by your organisation's Microsoft account." });
     }
 
     // Verify current password
