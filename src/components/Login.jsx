@@ -64,6 +64,7 @@ function Login({ onLoginSuccess }) {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
+          <img src="/altera-logomark.svg" alt="Altera" className="login-logo" />
           <h1>Matcha SOW</h1>
           <p>Sign in to continue</p>
         </div>
@@ -123,8 +124,7 @@ function Login({ onLoginSuccess }) {
         )}
 
         <div className="login-footer">
-          <p>Default admin credentials:</p>
-          <p><strong>Username:</strong> admin | <strong>Password:</strong> Admin@123</p>
+          <p>Contact your administrator for access.</p>
         </div>
       </div>
     </div>
