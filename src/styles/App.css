@@ -51,9 +51,41 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.sidebar-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.sidebar-graphicmark {
+  height: 40px;
+  width: auto;
+}
+
+.logout-icon-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  padding: 0.4rem 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.logout-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.6);
+  color: var(--primary-white);
+}
+
 .sidebar-header h1 {
   font-size: 1.75rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
   color: var(--primary-white);
 }
 
@@ -564,6 +596,15 @@ select.form-control {
 .login-header {
   text-align: center;
   margin-bottom: 2rem;
+}
+
+.login-logo {
+  height: 52px;
+  width: auto;
+  margin-bottom: 1rem;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .login-header h1 {

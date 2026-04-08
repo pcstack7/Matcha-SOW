@@ -121,6 +121,16 @@ function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-header">
+          <div className="sidebar-header-top">
+            <img src="/altera-graphicmark-rev.svg" alt="Altera" className="sidebar-graphicmark" />
+            <button className="logout-icon-btn" onClick={handleLogout} title="Logout">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          </div>
           <h1>Matcha SOW</h1>
           <p>Statement of Work Generator</p>
         </div>
@@ -208,11 +218,6 @@ function App() {
           )}
         </nav>
 
-        <div className="sidebar-footer">
-          <button className="btn btn-outline btn-block" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
       </aside>
       <main className="main-content">
         {renderContent()}
