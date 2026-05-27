@@ -1190,54 +1190,62 @@ function AdHocRow({ row, previewText, conflict, onUpdate, onRemove }) {
     : matchCount === 1 ? '1 match'
     : `${matchCount} matches`;
 
+  // Auto-size textareas so long contextualized strings (find/replace pairs
+  // from the click-to-edit popover often have ~15 chars of paragraph context
+  // wrapped around the core text) become fully visible without scrolling.
+  // Cap rows so a single very long replacement can't dominate the panel.
+  const findRows = Math.min(4, Math.max(1, Math.ceil((row.find || '').length / 40)));
+  const replaceRows = Math.min(4, Math.max(1, Math.ceil((row.replace || '').length / 40)));
+
+  const isDeletion = !!row.find && row.replace === '';
+
   return (
     <div
       className={conflict ? 'adhoc-row-conflict' : ''}
       style={{
         background: '#fff',
         border: '1px solid #e5e7eb',
-        borderRadius: 6,
-        padding: '0.6rem 0.75rem',
+        borderRadius: 8,
+        padding: '0.7rem 0.85rem',
       }}
     >
       {conflict && (
         <div style={{
           fontSize: '0.7rem',
           color: '#92400e',
-          marginBottom: 6,
+          marginBottom: 8,
           display: 'flex',
           gap: 4,
-          alignItems: 'center',
+          alignItems: 'flex-start',
         }}>
           <span>⚠</span>
           <span>
             {conflict.type === 'duplicate' ? 'Duplicate of' : 'Overlaps with'}:{' '}
-            <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>
+            <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3, wordBreak: 'break-all' }}>
               {conflict.withFind.length > 60 ? conflict.withFind.slice(0, 60) + '…' : conflict.withFind}
             </code>
           </span>
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: '0.5rem', alignItems: 'center' }}>
-        <input
-          type="text"
-          className="form-control"
-          placeholder="Find (literal text)"
-          value={row.find}
-          onChange={(e) => onUpdate({ find: e.target.value })}
-          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85rem' }}
-        />
-        <input
-          type="text"
-          className="form-control"
-          placeholder="Replace with"
-          value={row.replace}
-          onChange={(e) => onUpdate({ replace: e.target.value })}
-          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85rem' }}
-        />
+
+      {/* ── Header bar: match-count chip + delete ───────────────────── */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+      }}>
         <span style={{
-          fontSize: '0.7rem', fontWeight: 600, color: countTone,
-          whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right',
+          fontSize: '0.68rem',
+          fontWeight: 700,
+          color: countTone,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          background: row.find
+            ? (matchCount === 0 ? '#fef2f2' : matchCount === 1 ? '#fffbeb' : '#ecfdf5')
+            : '#f3f4f6',
+          padding: '3px 8px',
+          borderRadius: 10,
         }}>
           {countLabel}
         </span>
@@ -1245,23 +1253,110 @@ function AdHocRow({ row, previewText, conflict, onUpdate, onRemove }) {
           type="button"
           onClick={onRemove}
           aria-label="Remove replacement"
+          title="Remove this replacement"
           style={{
             background: 'transparent',
             border: '1px solid #e5e7eb',
             borderRadius: 4,
             color: '#6b7280',
-            width: 28, height: 28,
+            width: 26, height: 26,
             cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '1rem', lineHeight: 1,
+            fontSize: '1.05rem', lineHeight: 1, padding: 0,
           }}
-          title="Remove this replacement"
-        >
-          ×
-        </button>
+        >×</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.4rem', fontSize: '0.75rem', color: '#6b7280' }}>
+      {/* ── FIND field ──────────────────────────────────────────────── */}
+      <label style={{
+        display: 'block',
+        fontSize: '0.65rem',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        color: '#6b7280',
+        marginBottom: 3,
+      }}>
+        Find
+      </label>
+      <textarea
+        className="form-control"
+        placeholder="Literal text to search for in the template"
+        value={row.find}
+        title={row.find || ''}
+        onChange={(e) => onUpdate({ find: e.target.value })}
+        rows={findRows}
+        style={{
+          width: '100%',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: '0.82rem',
+          lineHeight: 1.45,
+          resize: 'vertical',
+          marginBottom: 8,
+          padding: '0.4rem 0.55rem',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      />
+
+      {/* ── REPLACE WITH field ──────────────────────────────────────── */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+        marginBottom: 3,
+      }}>
+        <label style={{
+          fontSize: '0.65rem',
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: '#6b7280',
+        }}>
+          Replace with
+        </label>
+        {isDeletion && (
+          <span style={{
+            fontSize: '0.65rem',
+            color: '#dc2626',
+            fontWeight: 600,
+          }}>
+            🗑️ empty = deletes text
+          </span>
+        )}
+      </div>
+      <textarea
+        className="form-control"
+        placeholder="(leave empty to remove the found text)"
+        value={row.replace}
+        title={row.replace || ''}
+        onChange={(e) => onUpdate({ replace: e.target.value })}
+        rows={replaceRows}
+        style={{
+          width: '100%',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: '0.82rem',
+          lineHeight: 1.45,
+          resize: 'vertical',
+          marginBottom: 8,
+          padding: '0.4rem 0.55rem',
+          background: isDeletion ? '#fef2f2' : '#fff',
+          borderColor: isDeletion ? '#fecaca' : undefined,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      />
+
+      {/* ── Options row ─────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        fontSize: '0.72rem',
+        color: '#6b7280',
+        paddingTop: 4,
+        borderTop: '1px dashed #f3f4f6',
+        marginTop: 2,
+      }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
           <input
             type="checkbox"
