@@ -23,6 +23,11 @@ function TemplateGenerator() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
+  // Ad-hoc find/replace pairs the user adds at generation time
+  const [adHocReplacements, setAdHocReplacements] = useState([]);
+  // Plain-text preview of the selected template — used for live match counts
+  const [previewText, setPreviewText] = useState('');
+
   // ── Initial data load ──────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
@@ -97,6 +102,20 @@ function TemplateGenerator() {
     setSelectedAccountId('');
     setError(null);
     setSuccess(null);
+    setAdHocReplacements([]);
+    setPreviewText('');
+  }, [selectedTemplateId]);
+
+  // Fetch the plain-text preview of the selected template so the ad-hoc
+  // panel can show live match counts as the user types.
+  useEffect(() => {
+    if (!selectedTemplateId) return;
+    let cancelled = false;
+    fetch(`/api/fixed-templates/${selectedTemplateId}/preview-text`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((data) => { if (!cancelled) setPreviewText(data.text || ''); })
+      .catch(() => { if (!cancelled) setPreviewText(''); });
+    return () => { cancelled = true; };
   }, [selectedTemplateId]);
 
   // ── Field updates ──────────────────────────────────────────────────
@@ -112,12 +131,23 @@ function TemplateGenerator() {
     setError(null);
     setSuccess(null);
 
+    // Only send replacements that have a non-empty find AND replace pair.
+    // Strip the client-side `id` field — the API expects {find, replace, ...}.
+    const validReplacements = adHocReplacements
+      .filter((r) => r.find && r.find.trim() !== '' && r.replace !== undefined && r.replace !== null)
+      .map(({ find, replace, caseSensitive, wholeWord }) => ({
+        find, replace, caseSensitive, wholeWord,
+      }));
+
     try {
       const r = await fetch(`/api/fixed-templates/${selectedTemplate.id}/generate`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ placeholder_values: values }),
+        body: JSON.stringify({
+          placeholder_values: values,
+          ad_hoc_replacements: validReplacements,
+        }),
       });
 
       if (!r.ok) {
@@ -292,6 +322,15 @@ function TemplateGenerator() {
             </div>
           )}
 
+          {/* Ad-hoc find/replace — for anything not pre-marked as a placeholder */}
+          <div style={{ marginTop: '1.25rem' }}>
+            <AdHocReplacementsPanel
+              replacements={adHocReplacements}
+              onChange={setAdHocReplacements}
+              previewText={previewText}
+            />
+          </div>
+
           {/* Generate button */}
           <div className="modal-footer" style={{ marginTop: '1rem' }}>
             <button
@@ -431,6 +470,202 @@ function renderInputForField(field, value, onChange) {
         />
       );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ad-hoc replacements panel — find/replace for anything not pre-marked
+// ═══════════════════════════════════════════════════════════════════════════
+
+function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
+  const addRow = () => {
+    onChange([
+      ...replacements,
+      {
+        id: `r_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        find: '',
+        replace: '',
+        caseSensitive: true,
+        wholeWord: false,
+      },
+    ]);
+  };
+
+  const updateRow = (id, patch) => {
+    onChange(replacements.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  const removeRow = (id) => {
+    onChange(replacements.filter((r) => r.id !== id));
+  };
+
+  return (
+    <div style={{
+      background: '#fafafa',
+      border: '1px solid #e5e7eb',
+      borderRadius: 8,
+      padding: '1rem',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+        <div>
+          <p style={{
+            fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase',
+            letterSpacing: '0.06em', color: '#6b7280', margin: 0,
+          }}>
+            Additional Replacements (optional)
+          </p>
+          <p style={{ fontSize: '0.75rem', color: '#6b7280', margin: '0.25rem 0 0' }}>
+            Replace any literal text in the template — environment names, hostnames, project codes — that isn't a defined placeholder.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={addRow}
+          style={{
+            background: '#2563eb',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            padding: '0.4rem 0.75rem',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          + Add replacement
+        </button>
+      </div>
+
+      {replacements.length === 0 ? (
+        <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: '0.5rem 0 0', fontStyle: 'italic' }}>
+          No additional replacements. Click "Add replacement" if you need to swap out text on the fly.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.5rem' }}>
+          {replacements.map((r) => (
+            <AdHocRow
+              key={r.id}
+              row={r}
+              previewText={previewText}
+              onUpdate={(patch) => updateRow(r.id, patch)}
+              onRemove={() => removeRow(r.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdHocRow({ row, previewText, onUpdate, onRemove }) {
+  // Live match count against the template's plain text.
+  const matchCount = useMemo(() => {
+    if (!row.find || !previewText) return 0;
+    return countMatches(previewText, row.find, {
+      caseSensitive: row.caseSensitive,
+      wholeWord: row.wholeWord,
+    });
+  }, [row.find, row.caseSensitive, row.wholeWord, previewText]);
+
+  const countTone =
+    !row.find ? '#9ca3af'
+    : matchCount === 0 ? '#dc2626'
+    : matchCount === 1 ? '#d97706'
+    : '#059669';
+  const countLabel =
+    !row.find ? '— enter find text —'
+    : matchCount === 0 ? 'No matches'
+    : matchCount === 1 ? '1 match'
+    : `${matchCount} matches`;
+
+  return (
+    <div style={{
+      background: '#fff',
+      border: '1px solid #e5e7eb',
+      borderRadius: 6,
+      padding: '0.6rem 0.75rem',
+    }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: '0.5rem', alignItems: 'center' }}>
+        <input
+          type="text"
+          className="form-control"
+          placeholder="Find (literal text)"
+          value={row.find}
+          onChange={(e) => onUpdate({ find: e.target.value })}
+          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85rem' }}
+        />
+        <input
+          type="text"
+          className="form-control"
+          placeholder="Replace with"
+          value={row.replace}
+          onChange={(e) => onUpdate({ replace: e.target.value })}
+          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.85rem' }}
+        />
+        <span style={{
+          fontSize: '0.7rem', fontWeight: 600, color: countTone,
+          whiteSpace: 'nowrap', minWidth: 90, textAlign: 'right',
+        }}>
+          {countLabel}
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove replacement"
+          style={{
+            background: 'transparent',
+            border: '1px solid #e5e7eb',
+            borderRadius: 4,
+            color: '#6b7280',
+            width: 28, height: 28,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1rem', lineHeight: 1,
+          }}
+          title="Remove this replacement"
+        >
+          ×
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.4rem', fontSize: '0.75rem', color: '#6b7280' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={row.caseSensitive}
+            onChange={(e) => onUpdate({ caseSensitive: e.target.checked })}
+          />
+          Case-sensitive
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={row.wholeWord}
+            onChange={(e) => onUpdate({ wholeWord: e.target.checked })}
+          />
+          Match whole word
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// Count non-overlapping matches in `text` using the same matching semantics
+// as the server-side replacer.
+function countMatches(text, find, { caseSensitive, wholeWord }) {
+  if (!find) return 0;
+  const escaped = find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = wholeWord ? `\\b${escaped}\\b` : escaped;
+  const flags = caseSensitive ? 'g' : 'gi';
+  let regex;
+  try { regex = new RegExp(pattern, flags); } catch { return 0; }
+  let count = 0;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m[0].length === 0) { regex.lastIndex++; continue; }
+    count++;
+  }
+  return count;
 }
 
 // ── Date helpers ────────────────────────────────────────────────────────────

@@ -12,9 +12,10 @@ import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
-import { scanDocument } from "./services/docx-scanner.js";
+import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
 import { generateDocument } from "./services/docx-generator.js";
+import { applyAdHocReplacements } from "./services/docx-replacer.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -2768,7 +2769,7 @@ app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
     if (!template) return res.status(404).json({ error: "Template not found" });
     if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
 
-    const { placeholder_values } = req.body || {};
+    const { placeholder_values, ad_hoc_replacements } = req.body || {};
     if (!placeholder_values || typeof placeholder_values !== 'object') {
       return res.status(400).json({ error: "placeholder_values must be an object" });
     }
@@ -2779,8 +2780,13 @@ app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
     }
     const templateBuffer = fs.readFileSync(template.file_path);
 
-    // Substitute and stream back
-    const filled = generateDocument(templateBuffer, placeholder_values);
+    // 1. Fill the defined placeholders via docxtemplater
+    let filled = generateDocument(templateBuffer, placeholder_values);
+
+    // 2. Apply any user-supplied ad-hoc find/replace pairs on top
+    if (Array.isArray(ad_hoc_replacements) && ad_hoc_replacements.length > 0) {
+      filled = applyAdHocReplacements(filled, ad_hoc_replacements);
+    }
 
     // Build a friendly filename: <client>_<template>_<YYYY-MM-DD>.docx
     const clientLabel =
@@ -2798,6 +2804,25 @@ app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
   } catch (err) {
     console.error("Error generating fixed SOW:", err);
     res.status(500).json({ error: err.message || "Failed to generate document" });
+  }
+});
+
+// Preview the raw text of a template (used by the client to compute live
+// match counts as the user types ad-hoc replacements).
+app.get("/api/fixed-templates/:id/preview-text", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file is missing on the server. Please re-upload the template." });
+    }
+    const buffer = fs.readFileSync(template.file_path);
+    const { text } = extractText(buffer);
+    res.json({ text });
+  } catch (err) {
+    console.error("Error reading template text:", err);
+    res.status(500).json({ error: err.message || "Failed to read template text" });
   }
 });
 
