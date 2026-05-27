@@ -2807,6 +2807,34 @@ app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
   }
 });
 
+// Render a filled template as a .docx blob for in-browser preview.
+// Same pipeline as /generate but without the Content-Disposition header
+// (not a download — the client renders it via docx-preview).
+app.post("/api/fixed-templates/:id/render-preview", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file missing on server" });
+    }
+    const { placeholder_values = {}, ad_hoc_replacements = [] } = req.body || {};
+
+    const templateBuffer = fs.readFileSync(template.file_path);
+    let filled = generateDocument(templateBuffer, placeholder_values);
+    if (Array.isArray(ad_hoc_replacements) && ad_hoc_replacements.length > 0) {
+      filled = applyAdHocReplacements(filled, ad_hoc_replacements);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Length', filled.length);
+    res.send(filled);
+  } catch (err) {
+    console.error("Error rendering preview:", err);
+    res.status(500).json({ error: err.message || "Failed to render preview" });
+  }
+});
+
 // Preview the raw text of a template (used by the client to compute live
 // match counts as the user types ad-hoc replacements).
 app.get("/api/fixed-templates/:id/preview-text", isAuthenticated, (req, res) => {

@@ -8,7 +8,8 @@
  *   4. Click Generate — backend returns a filled .docx as a download
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { renderAsync } from 'docx-preview';
 
 function TemplateGenerator() {
   const [templates, setTemplates] = useState([]);
@@ -27,6 +28,13 @@ function TemplateGenerator() {
   const [adHocReplacements, setAdHocReplacements] = useState([]);
   // Plain-text preview of the selected template — used for live match counts
   const [previewText, setPreviewText] = useState('');
+
+  // D-Lite preview pane
+  const [previewRendering, setPreviewRendering] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+  const previewContainerRef = useRef(null);
+  // Track a counter so we can debounce preview refreshes
+  const previewVersionRef = useRef(0);
 
   // ── Initial data load ──────────────────────────────────────────────
   useEffect(() => {
@@ -118,6 +126,59 @@ function TemplateGenerator() {
     return () => { cancelled = true; };
   }, [selectedTemplateId]);
 
+  // ── Preview render (debounced 600ms) ──────────────────────────────
+  useEffect(() => {
+    if (!selectedTemplate || !selectedAccount) return;
+
+    const version = ++previewVersionRef.current;
+    const timer = setTimeout(async () => {
+      if (version !== previewVersionRef.current) return; // stale
+      if (!previewContainerRef.current) return;
+
+      setPreviewRendering(true);
+      setPreviewError(null);
+
+      const validReplacements = adHocReplacements
+        .filter((r) => r.find && r.find.trim())
+        .map(({ find, replace, caseSensitive, wholeWord }) => ({ find, replace, caseSensitive, wholeWord }));
+
+      try {
+        const r = await fetch(`/api/fixed-templates/${selectedTemplate.id}/render-preview`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ placeholder_values: values, ad_hoc_replacements: validReplacements }),
+        });
+        if (!r.ok) throw new Error('Preview failed');
+        if (version !== previewVersionRef.current) return; // stale by the time response arrived
+
+        const blob = await r.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+
+        // Clear the container before rendering to avoid stacking
+        previewContainerRef.current.innerHTML = '';
+        await renderAsync(arrayBuffer, previewContainerRef.current, undefined, {
+          className: 'docx-preview-doc',
+          inWrapper: false,
+          ignoreWidth: true,
+          ignoreHeight: false,
+          breakPages: true,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+        });
+      } catch (err) {
+        if (version !== previewVersionRef.current) return;
+        setPreviewError('Preview could not be generated. The downloaded file will still be correct.');
+      } finally {
+        if (version === previewVersionRef.current) setPreviewRendering(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, selectedAccount, values, adHocReplacements]);
+
   // ── Field updates ──────────────────────────────────────────────────
   const setValue = (key) => (e) => {
     const v = e?.target?.type === 'date' ? formatHumanDate(e.target.value) : e.target.value;
@@ -202,150 +263,216 @@ function TemplateGenerator() {
     );
   }
 
+  // ── 2-pane layout when a template is selected ─────────────────────
+  const hasPreview = !!(selectedTemplate && selectedAccount);
+
   return (
-    <>
-      {error && <div className="alert alert-error">{error}</div>}
-      {success && <div className="alert alert-success">{success}</div>}
+    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', minHeight: 0 }}>
 
-      {/* ── Template selector ───────────────────────────────────────── */}
-      <div className="card">
-        <div className="card-header">
-          <h3>1. Choose a Template</h3>
-        </div>
+      {/* ── LEFT PANE — controls ────────────────────────────────── */}
+      <div style={{ flex: hasPreview ? '0 0 420px' : '1', minWidth: 0 }}>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
-          {templates.map((t) => {
-            const isSelected = Number(selectedTemplateId) === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setSelectedTemplateId(String(t.id))}
-                style={{
-                  textAlign: 'left',
-                  background: isSelected ? '#eff6ff' : '#fff',
-                  border: `2px solid ${isSelected ? '#2563eb' : '#e5e7eb'}`,
-                  borderRadius: 8,
-                  padding: '0.85rem 1rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  position: 'relative',
-                }}
-              >
-                {isSelected && (
-                  <div style={{
-                    position: 'absolute', top: 8, right: 8,
-                    width: 20, height: 20, borderRadius: '50%',
-                    background: '#2563eb', color: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '0.7rem', fontWeight: 700,
-                  }}>✓</div>
-                )}
-                <div style={{ fontWeight: 600, color: '#111827', paddingRight: 24 }}>{t.name}</div>
-                {t.description && (
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 4, lineHeight: 1.4 }}>
-                    {t.description}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  {t.product_name && (
-                    <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
-                      {t.product_name}
-                    </span>
-                  )}
-                  {t.engagement_type_name && (
-                    <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
-                      {t.engagement_type_name}
-                    </span>
-                  )}
-                  <span style={{
-                    background: '#eff6ff', color: '#1e40af',
-                    padding: '2px 8px', borderRadius: 10,
-                    fontSize: '0.7rem', fontWeight: 600,
-                  }}>
-                    {t.placeholders.length} field{t.placeholders.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+        {error && <div className="alert alert-error">{error}</div>}
+        {success && <div className="alert alert-success">{success}</div>}
 
-      {/* ── Account selector + dynamic field panel ─────────────────── */}
-      {selectedTemplate && (
-        <div className="card" style={{ marginTop: '1rem' }}>
+        {/* Template selector */}
+        <div className="card">
           <div className="card-header">
-            <h3>2. Fill in Details</h3>
+            <h3>1. Choose a Template</h3>
           </div>
 
-          {/* Account first — drives auto-fill */}
-          <div className="form-group">
-            <label>
-              Account <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <select
-              className="form-control"
-              value={selectedAccountId}
-              onChange={(e) => setSelectedAccountId(e.target.value)}
-            >
-              <option value="">Choose an account...</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}{a.short_name ? ` (${a.short_name})` : ''}
-                </option>
-              ))}
-            </select>
-            <small style={{ color: '#6b7280', fontSize: '0.75rem' }}>
-              Account fields (short name, client number, country, sites) auto-fill from this selection.
-            </small>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.6rem' }}>
+            {templates.map((t) => {
+              const isSelected = Number(selectedTemplateId) === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSelectedTemplateId(String(t.id))}
+                  style={{
+                    textAlign: 'left',
+                    background: isSelected ? '#eff6ff' : '#fff',
+                    border: `2px solid ${isSelected ? '#2563eb' : '#e5e7eb'}`,
+                    borderRadius: 8,
+                    padding: '0.75rem 0.9rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    position: 'relative',
+                  }}
+                >
+                  {isSelected && (
+                    <div style={{
+                      position: 'absolute', top: 7, right: 7,
+                      width: 18, height: 18, borderRadius: '50%',
+                      background: '#2563eb', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.65rem', fontWeight: 700,
+                    }}>✓</div>
+                  )}
+                  <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.88rem', paddingRight: 22 }}>{t.name}</div>
+                  {t.description && (
+                    <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: 3, lineHeight: 1.4 }}>
+                      {t.description}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+                    {t.product_name && (
+                      <span className="badge badge-secondary" style={{ fontSize: '0.68rem' }}>{t.product_name}</span>
+                    )}
+                    {t.engagement_type_name && (
+                      <span className="badge badge-secondary" style={{ fontSize: '0.68rem' }}>{t.engagement_type_name}</span>
+                    )}
+                    <span style={{
+                      background: '#eff6ff', color: '#1e40af',
+                      padding: '2px 7px', borderRadius: 10,
+                      fontSize: '0.68rem', fontWeight: 600,
+                    }}>
+                      {t.placeholders.length} field{t.placeholders.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
+        </div>
 
-          {selectedAccount && (
-            <AutoFilledSummary account={selectedAccount} templateFields={templateFields} />
-          )}
+        {/* Account + field panel */}
+        {selectedTemplate && (
+          <div className="card" style={{ marginTop: '0.75rem' }}>
+            <div className="card-header">
+              <h3>2. Fill in Details</h3>
+            </div>
 
-          {/* Manual entry fields — one per placeholder w/o data_source */}
-          {fieldsRequiringInput.length > 0 && (
+            <div className="form-group">
+              <label>Account <span style={{ color: '#ef4444' }}>*</span></label>
+              <select
+                className="form-control"
+                value={selectedAccountId}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+              >
+                <option value="">Choose an account...</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{a.short_name ? ` (${a.short_name})` : ''}
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: '#6b7280', fontSize: '0.75rem' }}>
+                Account fields auto-fill from this selection.
+              </small>
+            </div>
+
+            {selectedAccount && (
+              <AutoFilledSummary account={selectedAccount} templateFields={templateFields} />
+            )}
+
+            {fieldsRequiringInput.length > 0 && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <p style={{
+                  fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase',
+                  letterSpacing: '0.06em', color: '#6b7280', marginBottom: '0.6rem',
+                }}>
+                  Document Fields
+                </p>
+                <DynamicFieldPanel
+                  fields={fieldsRequiringInput}
+                  values={values}
+                  onChange={setValue}
+                />
+              </div>
+            )}
+
             <div style={{ marginTop: '1rem' }}>
-              <p style={{
-                fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.06em', color: '#6b7280', marginBottom: '0.75rem',
-              }}>
-                Document Fields
-              </p>
-              <DynamicFieldPanel
-                fields={fieldsRequiringInput}
-                values={values}
-                onChange={setValue}
+              <AdHocReplacementsPanel
+                replacements={adHocReplacements}
+                onChange={setAdHocReplacements}
+                previewText={previewText}
               />
             </div>
-          )}
 
-          {/* Ad-hoc find/replace — for anything not pre-marked as a placeholder */}
-          <div style={{ marginTop: '1.25rem' }}>
-            <AdHocReplacementsPanel
-              replacements={adHocReplacements}
-              onChange={setAdHocReplacements}
-              previewText={previewText}
-            />
+            <div className="modal-footer" style={{ marginTop: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleGenerate}
+                disabled={!selectedAccount || generating}
+                style={{ minWidth: 180 }}
+              >
+                {generating ? 'Generating…' : '⬇  Download .docx'}
+              </button>
+            </div>
           </div>
+        )}
+      </div>
 
-          {/* Generate button */}
-          <div className="modal-footer" style={{ marginTop: '1rem' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleGenerate}
-              disabled={!selectedAccount || generating}
-              style={{ minWidth: 200 }}
-            >
-              {generating ? 'Generating…' : '⬇  Generate & Download .docx'}
-            </button>
+      {/* ── RIGHT PANE — live preview ───────────────────────────── */}
+      {hasPreview && (
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          position: 'sticky',
+          top: '1rem',
+          maxHeight: 'calc(100vh - 5rem)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <div className="card" style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            padding: '1rem',
+          }}>
+            {/* Preview header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: '0.75rem', paddingBottom: '0.75rem',
+              borderBottom: '1px solid #e5e7eb',
+            }}>
+              <div>
+                <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#111827' }}>
+                  Live Preview
+                </span>
+                {previewRendering && (
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: 8 }}>
+                    Updating…
+                  </span>
+                )}
+              </div>
+              <span style={{
+                fontSize: '0.7rem', color: '#9ca3af', fontStyle: 'italic',
+              }}>
+                Approximate — open .docx for final layout
+              </span>
+            </div>
+
+            {previewError && (
+              <div style={{
+                background: '#fffbeb', border: '1px solid #fcd34d',
+                borderRadius: 6, padding: '0.6rem 0.8rem',
+                fontSize: '0.78rem', color: '#92400e', marginBottom: '0.5rem',
+              }}>
+                ⚠ {previewError}
+              </div>
+            )}
+
+            {/* docx-preview renders here */}
+            <div
+              ref={previewContainerRef}
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                background: '#f9fafb',
+                borderRadius: 6,
+                padding: '0.5rem',
+                opacity: previewRendering ? 0.5 : 1,
+                transition: 'opacity 0.2s',
+              }}
+            />
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

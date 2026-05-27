@@ -1402,6 +1402,26 @@ select.form-control {
   text-decoration: underline;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   DOCX-PREVIEW — styles for the live preview pane
+   ───────────────────────────────────────────────────────────────── */
+.docx-preview-doc {
+  font-family: 'Calibri', 'Arial', sans-serif !important;
+  font-size: 10pt !important;
+}
+
+/* Each page gets a white card-like appearance */
+.docx-preview-doc section {
+  background: #fff !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
+  margin-bottom: 0.75rem !important;
+  border-radius: 4px !important;
+}
+
+/* Scrollbar inside preview */
+div[ref="previewContainer"]::-webkit-scrollbar { width: 6px; }
+div[ref="previewContainer"]::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
 /* ─── Scope Management & shared components ─── */
 
 .tab-nav {
