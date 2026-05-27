@@ -289,12 +289,13 @@ function TemplateGenerator() {
   };
 
   // Save edit → append to adHocReplacements (preview re-renders automatically)
+  // Empty `replaceText` is valid — it deletes the selected text from the doc.
   const saveEditPopover = () => {
     if (!editPopover) return;
     const { findText, replaceText, matchCount, replaceAll, paraText } = editPopover;
 
-    // No-op if user didn't change anything
-    if (!replaceText || replaceText === findText) {
+    // No-op only if the replacement is identical to the original
+    if (replaceText === findText) {
       setEditPopover(null);
       return;
     }
@@ -711,8 +712,25 @@ function TemplateGenerator() {
                 {editPopover.findText}
               </div>
 
-              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: 4 }}>
-                REPLACE WITH
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>REPLACE WITH</span>
+                <button
+                  type="button"
+                  onClick={() => setEditPopover({ ...editPopover, replaceText: '' })}
+                  title="Clear field to delete the selected text"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#dc2626',
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '0 4px',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Clear (delete text)
+                </button>
               </div>
               <input
                 type="text"
@@ -723,8 +741,31 @@ function TemplateGenerator() {
                   if (e.key === 'Enter') saveEditPopover();
                 }}
                 autoFocus
+                placeholder="(empty = delete this text)"
                 style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '0.85rem' }}
               />
+
+              {/* Deletion hint — only when the field is empty AND the user changed something */}
+              {editPopover.replaceText === '' && editPopover.findText !== '' && (
+                <div style={{
+                  fontSize: '0.72rem',
+                  color: '#dc2626',
+                  marginTop: 6,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: 5,
+                  padding: '0.4rem 0.55rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 6,
+                }}>
+                  <span>🗑️</span>
+                  <span>
+                    Saving with an empty field will <strong>remove the selected text</strong> from the document
+                    {editPopover.matchCount > 1 && editPopover.replaceAll && ` (all ${editPopover.matchCount} occurrences)`}.
+                  </span>
+                </div>
+              )}
 
               {editPopover.matchCount > 1 && (
                 <label style={{
@@ -759,10 +800,12 @@ function TemplateGenerator() {
                 >Cancel</button>
                 <button
                   type="button"
-                  className="btn btn-primary btn-small"
+                  className={`btn btn-small ${editPopover.replaceText === '' ? 'btn-danger' : 'btn-primary'}`}
                   onClick={saveEditPopover}
-                  disabled={!editPopover.replaceText || editPopover.replaceText === editPopover.findText}
-                >Save edit</button>
+                  disabled={editPopover.replaceText === editPopover.findText}
+                >
+                  {editPopover.replaceText === '' ? '🗑️ Delete text' : 'Save edit'}
+                </button>
               </div>
             </div>
           )}
