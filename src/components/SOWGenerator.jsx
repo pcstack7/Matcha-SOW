@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { accountApi, templateApi, sowApi, exportApi, scopeSetApi, extractionApi } from '../services/api';
 import { formatContent } from '../utils/formatContent';
+import TemplateGenerator from './TemplateGenerator';
 
 function SOWGenerator() {
+  // v3 — mode toggle: 'ai' (existing flow) | 'template' (Fixed SOW Template flow)
+  const [mode, setMode] = useState('ai');
+
   const [accounts, setAccounts] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [products, setProducts] = useState([]);
@@ -188,9 +192,19 @@ function SOWGenerator() {
     <div>
       <div className="content-header">
         <h2>Generate Statement of Work</h2>
-        <p>Create professional SOW documents with AI assistance</p>
+        <p>
+          {mode === 'ai'
+            ? 'Create professional SOW documents with AI assistance'
+            : 'Generate a SOW from a fixed Word template by filling in dynamic fields'}
+        </p>
       </div>
 
+      <ModeToggle mode={mode} onChange={setMode} />
+
+      {mode === 'template' && <TemplateGenerator />}
+
+      {mode === 'ai' && (
+      <>
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
@@ -633,6 +647,61 @@ function SOWGenerator() {
           </div>
         </div>
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mode toggle — pill-style switcher between AI Generated and From Template
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ModeToggle({ mode, onChange }) {
+  const modes = [
+    { key: 'ai',       icon: '🤖', label: 'AI Generated',  desc: 'Generate from scratch with AI assistance' },
+    { key: 'template', icon: '📄', label: 'From Template', desc: 'Fill placeholders in a pre-built Word template' },
+  ];
+
+  return (
+    <div style={{
+      display: 'inline-flex',
+      background: '#f3f4f6',
+      borderRadius: 10,
+      padding: 4,
+      marginBottom: '1rem',
+      gap: 2,
+      border: '1px solid #e5e7eb',
+    }}>
+      {modes.map((m) => {
+        const isActive = mode === m.key;
+        return (
+          <button
+            key={m.key}
+            type="button"
+            onClick={() => onChange(m.key)}
+            title={m.desc}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '0.55rem 1.1rem',
+              border: 'none',
+              borderRadius: 8,
+              background: isActive ? '#fff' : 'transparent',
+              color: isActive ? '#111827' : '#6b7280',
+              fontWeight: isActive ? 600 : 500,
+              fontSize: '0.9rem',
+              cursor: 'pointer',
+              boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all 0.15s ease-out',
+            }}
+          >
+            <span style={{ fontSize: '1.05rem' }}>{m.icon}</span>
+            <span>{m.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

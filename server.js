@@ -14,6 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
+import { generateDocument } from "./services/docx-generator.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -2756,6 +2757,47 @@ app.delete("/api/fixed-templates/:id", isAuthenticated, requireAdmin, (req, res)
   } catch (err) {
     console.error("Error deleting fixed template:", err);
     res.status(500).json({ error: "Failed to delete template" });
+  }
+});
+
+// Generate a filled .docx by substituting placeholder values into a template.
+// Streams the result back as a downloadable file. No server-side persistence.
+app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+
+    const { placeholder_values } = req.body || {};
+    if (!placeholder_values || typeof placeholder_values !== 'object') {
+      return res.status(400).json({ error: "placeholder_values must be an object" });
+    }
+
+    // Read the processed template (already contains {{KEY}} markers)
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file is missing on the server. Please re-upload the template." });
+    }
+    const templateBuffer = fs.readFileSync(template.file_path);
+
+    // Substitute and stream back
+    const filled = generateDocument(templateBuffer, placeholder_values);
+
+    // Build a friendly filename: <client>_<template>_<YYYY-MM-DD>.docx
+    const clientLabel =
+      placeholder_values.CLIENT_SHORT_NAME ||
+      placeholder_values.CLIENT_FULL_NAME ||
+      'Client';
+    const today = new Date().toISOString().slice(0, 10);
+    const sanitize = (s) => String(s).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 50).replace(/^_+|_+$/g, '');
+    const outputName = `${sanitize(clientLabel)}_${sanitize(template.name)}_${today}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
+    res.setHeader('Content-Length', filled.length);
+    res.send(filled);
+  } catch (err) {
+    console.error("Error generating fixed SOW:", err);
+    res.status(500).json({ error: err.message || "Failed to generate document" });
   }
 });
 
