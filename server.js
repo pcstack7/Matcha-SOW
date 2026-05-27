@@ -11,7 +11,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps } from "./database.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -2432,6 +2432,117 @@ Do not include any explanation, markdown fences, or text outside the JSON object
     localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
     console.error("Error extracting from documents:", err);
     res.status(500).json({ error: "Failed to extract content from documents" });
+  }
+});
+
+// ============================================
+// PLACEHOLDER LIBRARY ENDPOINTS (v3 — fixed SOW templates)
+// ============================================
+
+// List placeholder definitions — readable by all authenticated users (needed by generator UI)
+app.get("/api/placeholder-definitions", isAuthenticated, (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const items = placeholderDefinitionOps.getAll(includeInactive);
+    // Parse JSON-encoded fields for the client
+    const parsed = items.map(item => ({
+      ...item,
+      detect_regex: item.detect_regex ? JSON.parse(item.detect_regex) : [],
+      input_options: item.input_options ? JSON.parse(item.input_options) : null,
+    }));
+    res.json(parsed);
+  } catch (err) {
+    console.error("Error fetching placeholder definitions:", err);
+    res.status(500).json({ error: "Failed to fetch placeholder definitions" });
+  }
+});
+
+// Create placeholder definition (admin only)
+app.post("/api/placeholder-definitions", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const { key, label, description, data_source, detect_regex, input_type, input_options, sort_order } = req.body;
+    if (!key || !label) {
+      return res.status(400).json({ error: "key and label are required" });
+    }
+    // Normalize the key — uppercase, alphanumeric + underscores only
+    const normalizedKey = String(key).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!normalizedKey) {
+      return res.status(400).json({ error: "key must contain at least one alphanumeric character" });
+    }
+    const id = placeholderDefinitionOps.create({
+      key: normalizedKey,
+      label,
+      description,
+      data_source,
+      detect_regex: Array.isArray(detect_regex) ? detect_regex : [],
+      input_type: input_type || 'text',
+      input_options: Array.isArray(input_options) && input_options.length > 0 ? input_options : null,
+      sort_order: Number(sort_order) || 0,
+    });
+    const created = placeholderDefinitionOps.getById(id);
+    res.status(201).json({
+      ...created,
+      detect_regex: created.detect_regex ? JSON.parse(created.detect_regex) : [],
+      input_options: created.input_options ? JSON.parse(created.input_options) : null,
+    });
+  } catch (err) {
+    if (String(err.message || '').includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: "A placeholder with that key already exists" });
+    }
+    console.error("Error creating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to create placeholder definition" });
+  }
+});
+
+// Update placeholder definition (admin only) — key is immutable
+app.put("/api/placeholder-definitions/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const existing = placeholderDefinitionOps.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Placeholder definition not found" });
+
+    const { label, description, data_source, detect_regex, input_type, input_options, sort_order } = req.body;
+    if (!label) return res.status(400).json({ error: "label is required" });
+
+    placeholderDefinitionOps.update(req.params.id, {
+      label,
+      description,
+      data_source,
+      detect_regex: Array.isArray(detect_regex) ? detect_regex : [],
+      input_type: input_type || 'text',
+      input_options: Array.isArray(input_options) && input_options.length > 0 ? input_options : null,
+      sort_order: Number(sort_order) || 0,
+    });
+    const updated = placeholderDefinitionOps.getById(req.params.id);
+    res.json({
+      ...updated,
+      detect_regex: updated.detect_regex ? JSON.parse(updated.detect_regex) : [],
+      input_options: updated.input_options ? JSON.parse(updated.input_options) : null,
+    });
+  } catch (err) {
+    console.error("Error updating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to update placeholder definition" });
+  }
+});
+
+// Deactivate placeholder definition (admin only)
+app.patch("/api/placeholder-definitions/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    placeholderDefinitionOps.deactivate(req.params.id);
+    res.json({ message: "Placeholder definition deactivated" });
+  } catch (err) {
+    console.error("Error deactivating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to deactivate placeholder definition" });
+  }
+});
+
+// Reactivate placeholder definition (admin only)
+app.patch("/api/placeholder-definitions/:id/reactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    placeholderDefinitionOps.reactivate(req.params.id);
+    res.json({ message: "Placeholder definition reactivated" });
+  } catch (err) {
+    console.error("Error reactivating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to reactivate placeholder definition" });
   }
 });
 
