@@ -444,6 +444,15 @@ body {
   background-color: #f04555;
 }
 
+.btn-warning {
+  background-color: #f59e0b;
+  color: #fff;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #d97706;
+}
+
 .btn-outline {
   background-color: transparent;
   border: 2px solid var(--primary-purple);
@@ -1589,6 +1598,57 @@ select.form-control {
 .preview-edit-popover-close:hover {
   background: #f3f4f6;
   color: #1f2937;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PHASE 3 — Occurrence highlighting inside the preview
+   ─────────────────────────────────────────────────────────────────
+   Two flavours of mark:
+     .preview-target-highlight — the specific occurrence the user selected
+                                 (strong orange ring, always visible)
+     .preview-other-highlight  — sibling occurrences that will ALSO be
+                                 replaced when "Replace all" is checked
+   ───────────────────────────────────────────────────────────────── */
+.docx-preview-host mark.preview-target-highlight {
+  background: #fed7aa;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px #f97316, 0 0 0 4px rgba(249, 115, 22, 0.25);
+  animation: highlight-pulse 1.2s ease-in-out infinite;
+}
+
+.docx-preview-host mark.preview-other-highlight {
+  background: #fef3c7;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fbbf24;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px #f97316, 0 0 0 4px rgba(249, 115, 22, 0.25); }
+  50%      { box-shadow: 0 0 0 2px #f97316, 0 0 0 6px rgba(249, 115, 22, 0.10); }
+}
+
+/* Conflict warning banner inside the popover */
+.preview-edit-conflict {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: #78350f;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* Row-level conflict ring in the ad-hoc replacements list */
+.adhoc-row-conflict {
+  border-color: #fbbf24 !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.18);
 }
 
 /* ─── Scope Management & shared components ─── */

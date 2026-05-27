@@ -595,8 +595,33 @@ function ConfirmationStep({
       .concat(customAdds.map((c) => c.key).filter(Boolean))
   );
 
+  const versionTablesCleared = scanResult.version_tables_cleared || 0;
+
   return (
     <>
+      {/* ── Revision-history cleanup notice ───────────────────────────── */}
+      {versionTablesCleared > 0 && (
+        <div style={{
+          padding: '0.7rem 0.9rem',
+          background: '#ecfdf5',
+          border: '1px solid #a7f3d0',
+          borderRadius: 6,
+          marginBottom: '0.9rem',
+          fontSize: '0.82rem',
+          color: '#065f46',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: '1rem' }}>🧹</span>
+          <span>
+            Cleared <strong>{versionTablesCleared}</strong> revision-history
+            {versionTablesCleared === 1 ? ' table' : ' tables'} from this template
+            so previous version entries won&apos;t carry into new SOWs. Headers were preserved.
+          </span>
+        </div>
+      )}
+
       <p style={{ fontSize: '0.85rem', color: '#374151', marginBottom: '1rem' }}>
         We scanned <strong>{scanResult.file_name}</strong> and found{' '}
         <strong>{detections.length}</strong> potential placeholder{detections.length === 1 ? '' : 's'}.

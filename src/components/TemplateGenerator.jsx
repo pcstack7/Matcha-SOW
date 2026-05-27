@@ -260,29 +260,45 @@ function TemplateGenerator() {
       if (node.nodeType === 3) node = node.parentElement; // text node → element
       const para = node?.closest?.('p, li, td, h1, h2, h3, h4, h5, h6, div') || node;
       const paraText = (para?.textContent || '').replace(/\s+/g, ' ').trim();
-      setPreviewSelection({ text: trimmed, rect, paraText });
+
+      // Phase 3 — record which occurrence (0-based) was actually selected so
+      // the preview can pulse a target-coloured highlight on exactly that one
+      // when the user opens the edit popover.
+      const occurrenceIndex = getOccurrenceIndexFromSelection(container, range, trimmed);
+
+      setPreviewSelection({ text: trimmed, rect, paraText, occurrenceIndex });
     }, 0);
   };
 
   // Open the inline edit popover from the current selection
   const openEditFromSelection = () => {
     if (!previewSelection) return;
-    const { text, rect, paraText } = previewSelection;
-    const matchCount = countMatches(previewText || '', text, { caseSensitive: true, wholeWord: false });
+    const { text, rect, paraText, occurrenceIndex } = previewSelection;
+
+    // Use the DOM's textContent for match-counting so the count agrees with
+    // what we'll visually highlight (the two are derived from the same source).
+    const container = previewContainerRef.current;
+    const domText = container?.textContent || '';
+    const matchCount = countLiteralOccurrences(domText, text);
+
     // Position popover below the selection if there's room, else above
     const viewportH = window.innerHeight;
-    const popoverHeight = 220; // approx
+    const popoverHeight = 260; // approx (slightly taller w/ disambiguation hint)
     const top = rect.bottom + popoverHeight < viewportH
       ? rect.bottom + 10
       : Math.max(8, rect.top - popoverHeight - 10);
     const left = Math.min(window.innerWidth - 360, Math.max(8, rect.left));
+
     setEditPopover({
       findText: text,
       replaceText: text,
       matchCount,
+      occurrenceIndex: occurrenceIndex >= 0 ? occurrenceIndex : 0,
       replaceAll: true,
       paraText,
       position: { top, left },
+      conflictDetected: null,
+      conflictAcknowledged: false,
     });
     setPreviewSelection(null);
     window.getSelection()?.removeAllRanges();
@@ -290,28 +306,30 @@ function TemplateGenerator() {
 
   // Save edit → append to adHocReplacements (preview re-renders automatically)
   // Empty `replaceText` is valid — it deletes the selected text from the doc.
-  const saveEditPopover = () => {
+  // Pass `skipConflictCheck=true` from the "Save anyway" path so the second
+  // click commits without re-tripping the duplicate detection.
+  const saveEditPopover = (skipConflictCheck = false) => {
     if (!editPopover) return;
-    const { findText, replaceText, matchCount, replaceAll, paraText } = editPopover;
+    const { findText, replaceText } = editPopover;
 
-    // No-op only if the replacement is identical to the original
+    // No-op if the replacement is identical to the original
     if (replaceText === findText) {
       setEditPopover(null);
       return;
     }
 
-    let actualFind = findText;
-    let actualReplace = replaceText;
+    // Build the actual find/replace strings (with paragraph-context
+    // disambiguation when "Replace this one only" is selected).
+    const { actualFind, actualReplace } = buildActualFindReplace(editPopover);
 
-    // When multiple matches exist AND user wants just this one, expand the
-    // find string with surrounding paragraph context so it becomes unique.
-    if (matchCount > 1 && !replaceAll && paraText) {
-      const idx = paraText.indexOf(findText);
-      if (idx >= 0) {
-        const before = paraText.substring(Math.max(0, idx - 15), idx);
-        const after = paraText.substring(idx + findText.length, Math.min(paraText.length, idx + findText.length + 15));
-        actualFind = before + findText + after;
-        actualReplace = before + replaceText + after;
+    // Phase 3 — surface conflicts BEFORE adding. First click of Save shows
+    // the warning; the user then clicks "Save anyway" which calls this with
+    // skipConflictCheck=true.
+    if (!skipConflictCheck) {
+      const conflict = findConflictForNewFind(adHocReplacements, actualFind);
+      if (conflict) {
+        setEditPopover({ ...editPopover, conflictDetected: conflict });
+        return;
       }
     }
 
@@ -346,6 +364,42 @@ function TemplateGenerator() {
       clearTimeout(t);
     };
   }, [editPopover]);
+
+  // ── Phase 3 — paint occurrence highlights inside the preview ─────
+  // Runs whenever the popover opens, switches "Replace all" mode, or its
+  // find-text shifts. Also re-runs after a preview re-render (which nukes
+  // the DOM) so highlights stay visible. Cleanup removes the <mark>
+  // wrappers so the next render (and the eventual download) sees clean DOM.
+  useEffect(() => {
+    const container = previewContainerRef.current;
+    if (!container) return;
+
+    if (editPopover && !previewRendering) {
+      // Defer one frame so we paint AFTER React commits any popover-related DOM
+      const id = requestAnimationFrame(() => {
+        highlightOccurrencesInPreview(
+          container,
+          editPopover.findText,
+          editPopover.occurrenceIndex ?? 0,
+          !!editPopover.replaceAll
+        );
+      });
+      return () => {
+        cancelAnimationFrame(id);
+        clearPreviewHighlights(container);
+      };
+    }
+    clearPreviewHighlights(container);
+  }, [
+    editPopover?.findText,
+    editPopover?.replaceAll,
+    editPopover?.occurrenceIndex,
+    editPopover,
+    previewRendering,
+  ]);
+
+  // Compute conflict map for the current ad-hoc list (used by the panel rows)
+  const conflictMap = useMemo(() => detectConflicts(adHocReplacements), [adHocReplacements]);
 
   // ── Field updates ──────────────────────────────────────────────────
   const setValue = (key) => (e) => {
@@ -555,6 +609,7 @@ function TemplateGenerator() {
                 replacements={adHocReplacements}
                 onChange={setAdHocReplacements}
                 previewText={previewText}
+                conflictMap={conflictMap}
               />
             </div>
 
@@ -776,7 +831,12 @@ function TemplateGenerator() {
                   <input
                     type="checkbox"
                     checked={editPopover.replaceAll}
-                    onChange={(e) => setEditPopover({ ...editPopover, replaceAll: e.target.checked })}
+                    onChange={(e) => setEditPopover({
+                      ...editPopover,
+                      replaceAll: e.target.checked,
+                      conflictDetected: null,
+                      conflictAcknowledged: false,
+                    })}
                   />
                   Replace all <strong style={{ color: '#1f2937' }}>{editPopover.matchCount}</strong> matches in the document
                 </label>
@@ -792,6 +852,59 @@ function TemplateGenerator() {
                 </div>
               )}
 
+              {/* Phase 3 — disambiguation hint for "just this one" on multi-match selections */}
+              {editPopover.matchCount > 1 && !editPopover.replaceAll && (() => {
+                const { contextChars } = buildActualFindReplace(editPopover);
+                const occLabel = (editPopover.occurrenceIndex ?? 0) + 1;
+                return (
+                  <div style={{
+                    fontSize: '0.72rem',
+                    color: '#92400e',
+                    marginTop: 8,
+                    background: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    borderRadius: 5,
+                    padding: '0.4rem 0.55rem',
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                      🎯 Targeting occurrence <strong>#{occLabel} of {editPopover.matchCount}</strong> (highlighted in orange)
+                    </div>
+                    {contextChars > 0 ? (
+                      <div>Using {contextChars} characters of surrounding paragraph text to lock in this exact instance.</div>
+                    ) : (
+                      <div style={{ color: '#dc2626' }}>
+                        ⚠ Couldn&apos;t isolate this occurrence — the text may have moved. Try re-selecting it.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Phase 3 — conflict warning when saving would duplicate or overlap an existing row */}
+              {editPopover.conflictDetected && (
+                <div className="preview-edit-conflict">
+                  <span style={{ fontSize: '0.95rem' }}>⚠</span>
+                  <span>
+                    <strong>
+                      {editPopover.conflictDetected.type === 'duplicate'
+                        ? 'You already added a replacement for this exact text.'
+                        : 'This replacement overlaps with an existing one.'}
+                    </strong>
+                    <div style={{ marginTop: 3, fontSize: '0.7rem', opacity: 0.9 }}>
+                      Existing find:{' '}
+                      <code style={{ background: '#fff', padding: '1px 5px', borderRadius: 3 }}>
+                        {editPopover.conflictDetected.withFind.length > 50
+                          ? editPopover.conflictDetected.withFind.slice(0, 50) + '…'
+                          : editPopover.conflictDetected.withFind}
+                      </code>
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      Click <strong>Save anyway</strong> to add this one too, or Cancel to skip.
+                    </div>
+                  </span>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
                 <button
                   type="button"
@@ -800,11 +913,24 @@ function TemplateGenerator() {
                 >Cancel</button>
                 <button
                   type="button"
-                  className={`btn btn-small ${editPopover.replaceText === '' ? 'btn-danger' : 'btn-primary'}`}
-                  onClick={saveEditPopover}
+                  className={`btn btn-small ${
+                    editPopover.conflictDetected
+                      ? 'btn-warning'
+                      : editPopover.replaceText === '' ? 'btn-danger' : 'btn-primary'
+                  }`}
+                  onClick={() => {
+                    if (editPopover.conflictDetected) {
+                      // 2nd click — commit, bypassing the dup check
+                      saveEditPopover(true);
+                    } else {
+                      saveEditPopover(false);
+                    }
+                  }}
                   disabled={editPopover.replaceText === editPopover.findText}
                 >
-                  {editPopover.replaceText === '' ? '🗑️ Delete text' : 'Save edit'}
+                  {editPopover.conflictDetected
+                    ? 'Save anyway'
+                    : editPopover.replaceText === '' ? '🗑️ Delete text' : 'Save edit'}
                 </button>
               </div>
             </div>
@@ -942,7 +1068,7 @@ function renderInputForField(field, value, onChange) {
 // Ad-hoc replacements panel — find/replace for anything not pre-marked
 // ═══════════════════════════════════════════════════════════════════════════
 
-function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
+function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictMap }) {
   const addRow = () => {
     onChange([
       ...replacements,
@@ -963,6 +1089,8 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
   const removeRow = (id) => {
     onChange(replacements.filter((r) => r.id !== id));
   };
+
+  const conflictCount = conflictMap ? conflictMap.size : 0;
 
   return (
     <div style={{
@@ -1002,6 +1130,23 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
         </button>
       </div>
 
+      {/* Phase 3 — global conflict banner */}
+      {conflictCount > 0 && (
+        <div style={{
+          background: '#fffbeb',
+          border: '1px solid #fde68a',
+          borderRadius: 6,
+          padding: '0.45rem 0.7rem',
+          marginTop: '0.5rem',
+          marginBottom: '0.1rem',
+          fontSize: '0.75rem',
+          color: '#92400e',
+        }}>
+          ⚠ <strong>{conflictCount}</strong> replacement{conflictCount === 1 ? '' : 's'} overlap with others —
+          highlighted in amber below. Later rows can silently no-op when an earlier row already swapped the text.
+        </div>
+      )}
+
       {replacements.length === 0 ? (
         <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: '0.5rem 0 0', fontStyle: 'italic' }}>
           No additional replacements. Click "Add replacement" if you need to swap out text on the fly.
@@ -1013,6 +1158,7 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
               key={r.id}
               row={r}
               previewText={previewText}
+              conflict={conflictMap?.get(r.id) || null}
               onUpdate={(patch) => updateRow(r.id, patch)}
               onRemove={() => removeRow(r.id)}
             />
@@ -1023,7 +1169,7 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText }) {
   );
 }
 
-function AdHocRow({ row, previewText, onUpdate, onRemove }) {
+function AdHocRow({ row, previewText, conflict, onUpdate, onRemove }) {
   // Live match count against the template's plain text.
   const matchCount = useMemo(() => {
     if (!row.find || !previewText) return 0;
@@ -1045,12 +1191,33 @@ function AdHocRow({ row, previewText, onUpdate, onRemove }) {
     : `${matchCount} matches`;
 
   return (
-    <div style={{
-      background: '#fff',
-      border: '1px solid #e5e7eb',
-      borderRadius: 6,
-      padding: '0.6rem 0.75rem',
-    }}>
+    <div
+      className={conflict ? 'adhoc-row-conflict' : ''}
+      style={{
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+        borderRadius: 6,
+        padding: '0.6rem 0.75rem',
+      }}
+    >
+      {conflict && (
+        <div style={{
+          fontSize: '0.7rem',
+          color: '#92400e',
+          marginBottom: 6,
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+        }}>
+          <span>⚠</span>
+          <span>
+            {conflict.type === 'duplicate' ? 'Duplicate of' : 'Overlaps with'}:{' '}
+            <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>
+              {conflict.withFind.length > 60 ? conflict.withFind.slice(0, 60) + '…' : conflict.withFind}
+            </code>
+          </span>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: '0.5rem', alignItems: 'center' }}>
         <input
           type="text"
@@ -1132,6 +1299,196 @@ function countMatches(text, find, { caseSensitive, wholeWord }) {
     count++;
   }
   return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 3 — preview highlighting + conflict detection helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Plain count of `findText` occurrences in a string (case-sensitive literal).
+function countLiteralOccurrences(text, findText) {
+  if (!findText || !text) return 0;
+  let count = 0;
+  let idx = 0;
+  while ((idx = text.indexOf(findText, idx)) !== -1) {
+    count++;
+    idx += findText.length;
+  }
+  return count;
+}
+
+// Compute the 0-based occurrence index of the user's selection within the
+// preview DOM, by counting how many copies of `findText` start before the
+// selection's start position in document order.
+function getOccurrenceIndexFromSelection(container, range, findText) {
+  if (!container || !range || !findText) return -1;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  let charOffset = 0;
+  let n;
+  let startGlobal = -1;
+  while ((n = walker.nextNode())) {
+    if (n === range.startContainer) {
+      startGlobal = charOffset + range.startOffset;
+      break;
+    }
+    charOffset += n.textContent.length;
+  }
+  if (startGlobal < 0) return -1;
+
+  const fullText = container.textContent || '';
+  let count = 0;
+  let idx = 0;
+  while ((idx = fullText.indexOf(findText, idx)) !== -1) {
+    if (idx >= startGlobal) break;
+    count++;
+    idx += findText.length;
+  }
+  return count;
+}
+
+// Wrap every occurrence of `findText` inside the preview container with a
+// <mark> element. The match whose index equals `targetIndex` gets the strong
+// "target" highlight; the others get a lighter highlight ONLY when
+// `replaceAll` is true. Cross-text-node matches are intentionally skipped
+// (rare in docx-preview output, and would require splitting siblings).
+function highlightOccurrencesInPreview(container, findText, targetIndex, replaceAll) {
+  if (!container || !findText) return;
+  clearPreviewHighlights(container);
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      // Skip already-wrapped marks and empty / whitespace-only nodes
+      if (node.parentElement?.tagName === 'MARK') return NodeFilter.FILTER_REJECT;
+      if (!node.textContent || !node.textContent.includes(findText)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const textNodes = [];
+  let n;
+  while ((n = walker.nextNode())) textNodes.push(n);
+
+  let occurrenceCounter = 0;
+  for (const textNode of textNodes) {
+    const text = textNode.textContent;
+    const parent = textNode.parentNode;
+    if (!parent) continue;
+
+    const fragments = [];
+    let cursor = 0;
+    let idx = text.indexOf(findText);
+    while (idx !== -1) {
+      if (idx > cursor) {
+        fragments.push(document.createTextNode(text.substring(cursor, idx)));
+      }
+      const isTarget = occurrenceCounter === targetIndex;
+      const matchText = text.substring(idx, idx + findText.length);
+
+      if (isTarget || replaceAll) {
+        const mark = document.createElement('mark');
+        mark.className = isTarget ? 'preview-target-highlight' : 'preview-other-highlight';
+        mark.dataset.previewHighlight = 'true';
+        mark.textContent = matchText;
+        fragments.push(mark);
+      } else {
+        // Plain text — this occurrence won't be touched (replaceAll off, not target)
+        fragments.push(document.createTextNode(matchText));
+      }
+
+      cursor = idx + findText.length;
+      occurrenceCounter++;
+      idx = text.indexOf(findText, cursor);
+    }
+    if (cursor < text.length) {
+      fragments.push(document.createTextNode(text.substring(cursor)));
+    }
+
+    const frag = document.createDocumentFragment();
+    fragments.forEach((f) => frag.appendChild(f));
+    parent.replaceChild(frag, textNode);
+  }
+}
+
+// Undo the DOM mutations made by highlightOccurrencesInPreview.
+function clearPreviewHighlights(container) {
+  if (!container) return;
+  const marks = container.querySelectorAll('mark[data-preview-highlight="true"]');
+  marks.forEach((m) => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    parent.replaceChild(document.createTextNode(m.textContent), m);
+  });
+  // Normalize merges adjacent text nodes that were split during highlighting.
+  if (marks.length > 0) container.normalize();
+}
+
+// Inspect the current ad-hoc list and return a Map of id -> { type, withId }
+// flagging any rows whose `find` strings duplicate or overlap each other.
+// "duplicate" = same find text with same options.
+// "overlap"   = one find string contains the other (potential silent stomp).
+function detectConflicts(replacements) {
+  const conflicts = new Map();
+  for (let i = 0; i < replacements.length; i++) {
+    const a = replacements[i];
+    if (!a.find) continue;
+    for (let j = 0; j < replacements.length; j++) {
+      if (i === j) continue;
+      const b = replacements[j];
+      if (!b.find) continue;
+
+      if (
+        a.find === b.find &&
+        a.caseSensitive === b.caseSensitive &&
+        a.wholeWord === b.wholeWord
+      ) {
+        conflicts.set(a.id, { type: 'duplicate', withFind: b.find });
+        break;
+      }
+      if (a.find.length !== b.find.length && (a.find.includes(b.find) || b.find.includes(a.find))) {
+        conflicts.set(a.id, { type: 'overlap', withFind: b.find });
+        break;
+      }
+    }
+  }
+  return conflicts;
+}
+
+// Check whether a NEW find/replace pair conflicts with anything already
+// staged. Used by the popover save flow to surface a "looks like a dupe"
+// warning before appending.
+function findConflictForNewFind(replacements, newFind) {
+  for (const existing of replacements) {
+    if (!existing.find) continue;
+    if (existing.find === newFind) {
+      return { type: 'duplicate', withFind: existing.find };
+    }
+    if (existing.find.length !== newFind.length && (existing.find.includes(newFind) || newFind.includes(existing.find))) {
+      return { type: 'overlap', withFind: existing.find };
+    }
+  }
+  return null;
+}
+
+// Compute the actual find/replace strings that will be sent to the server,
+// applying paragraph-context disambiguation when the user opted out of
+// "Replace all" on a multi-occurrence selection.
+function buildActualFindReplace(editPopover) {
+  const { findText, replaceText, matchCount, replaceAll, paraText } = editPopover;
+  let actualFind = findText;
+  let actualReplace = replaceText;
+  let contextChars = 0;
+  if (matchCount > 1 && !replaceAll && paraText) {
+    const idx = paraText.indexOf(findText);
+    if (idx >= 0) {
+      const before = paraText.substring(Math.max(0, idx - 15), idx);
+      const after = paraText.substring(idx + findText.length, Math.min(paraText.length, idx + findText.length + 15));
+      actualFind = before + findText + after;
+      actualReplace = before + replaceText + after;
+      contextChars = before.length + after.length;
+    }
+  }
+  return { actualFind, actualReplace, contextChars };
 }
 
 // ── Date helpers ────────────────────────────────────────────────────────────

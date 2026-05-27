@@ -14,6 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
+import { cleanVersionTables } from "./services/docx-version-cleaner.js";
 import { generateDocument } from "./services/docx-generator.js";
 import { applyAdHocReplacements } from "./services/docx-replacer.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
@@ -2616,6 +2617,11 @@ app.post("/api/fixed-templates/scan", isAuthenticated, requireAdmin, fixedTempla
       return res.status(400).json({ error: "No file uploaded" });
     }
 
+    // Strip any pre-existing revision-history table contents before scanning.
+    // Otherwise old version-row text (dates, author names, change descriptions)
+    // would pollute placeholder detection.
+    const { buffer: cleanedBuffer, tablesCleared } = cleanVersionTables(req.file.buffer);
+
     // Pull current placeholder library + active accounts to drive detection
     const definitions = placeholderDefinitionOps.getAll(false).map(d => ({
       ...d,
@@ -2624,12 +2630,13 @@ app.post("/api/fixed-templates/scan", isAuthenticated, requireAdmin, fixedTempla
     }));
     const accounts = accountOps.getAll('active');
 
-    const detections = scanDocument(req.file.buffer, definitions, accounts);
+    const detections = scanDocument(cleanedBuffer, definitions, accounts);
 
     res.json({
       file_name: req.file.originalname,
       file_size: req.file.size,
       detections,
+      version_tables_cleared: tablesCleared,
       placeholder_library: definitions.map(d => ({
         key: d.key,
         label: d.label,
@@ -2675,8 +2682,13 @@ app.post("/api/fixed-templates", isAuthenticated, requireAdmin, fixedTemplateUpl
       return res.status(400).json({ error: "mappings must be an array" });
     }
 
-    // Inject {{KEY}} markers into the document
-    const processed = injectPlaceholders(req.file.buffer, mappings);
+    // Empty any revision-history table rows BEFORE injecting placeholders.
+    // The persisted template must not retain version entries from the
+    // original source document — those belong to the previous engagement.
+    const { buffer: cleanedBuffer } = cleanVersionTables(req.file.buffer);
+
+    // Inject {{KEY}} markers into the cleaned document
+    const processed = injectPlaceholders(cleanedBuffer, mappings);
 
     // Persist the processed file to disk under a stable, collision-safe path
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
