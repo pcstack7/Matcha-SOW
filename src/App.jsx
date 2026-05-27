@@ -11,6 +11,7 @@ import Dashboard from './components/Dashboard';
 import ChangePassword from './components/ChangePassword';
 import ScopeManagement from './components/ScopeManagement';
 import PlaceholderLibrary from './components/PlaceholderLibrary';
+import FixedSOWTemplates from './components/FixedSOWTemplates';
 import Login from './components/Login';
 import Register from './components/Register';
 import './styles/App.css';
@@ -91,6 +92,8 @@ function App() {
         return <ScopeManagement />;
       case 'placeholder-library':
         return <PlaceholderLibrary userRole={user?.role} />;
+      case 'fixed-templates':
+        return <FixedSOWTemplates userRole={user?.role} />;
       default:
         return <SOWGenerator />;
     }
@@ -194,6 +197,12 @@ function App() {
             onClick={() => setActiveView('templates')}
           >
             Manage Templates
+          </div>
+          <div
+            className={`nav-item ${activeView === 'fixed-templates' ? 'active' : ''}`}
+            onClick={() => setActiveView('fixed-templates')}
+          >
+            Fixed SOW Templates
           </div>
           {user.role === 'admin' && (
             <>
