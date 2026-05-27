@@ -681,6 +681,7 @@ function TemplateGenerator() {
             flexDirection: 'column',
             overflow: 'hidden',
             padding: '1rem',
+            position: 'relative', /* Phase 4 — for the centred spinner overlay */
           }}>
             {/* Preview header */}
             <div style={{
@@ -726,33 +727,33 @@ function TemplateGenerator() {
               </div>
             )}
 
-            {/* docx-preview renders here */}
-            <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-              <div
-                ref={previewContainerRef}
-                onMouseUp={handlePreviewMouseUp}
-                className="docx-preview-host"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  overflowY: 'auto',
-                  background: '#f9fafb',
-                  borderRadius: 6,
-                  padding: '0.5rem',
-                  opacity: previewRendering ? 0.4 : 1,
-                  transition: 'opacity 0.2s',
-                  cursor: 'text',
-                }}
-              />
+            {/* docx-preview renders here — kept as a normal flex child so its
+                natural content height drives the pane size. */}
+            <div
+              ref={previewContainerRef}
+              onMouseUp={handlePreviewMouseUp}
+              className="docx-preview-host"
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                background: '#f9fafb',
+                borderRadius: 6,
+                padding: '0.5rem',
+                opacity: previewRendering ? 0.4 : 1,
+                transition: 'opacity 0.2s',
+                cursor: 'text',
+              }}
+            />
 
-              {/* Phase 4 — centred spinner overlay while the preview re-renders */}
-              {previewRendering && (
-                <div className="preview-loading-overlay" aria-live="polite" aria-busy="true">
-                  <div className="preview-loading-spinner" />
-                  <span className="preview-loading-label">Updating preview…</span>
-                </div>
-              )}
-            </div>
+            {/* Phase 4 — centred floating indicator while the preview re-renders.
+                Anchored to the card (position: relative) so it sits over the
+                preview without needing its own sized wrapper. */}
+            {previewRendering && (
+              <div className="preview-loading-overlay" aria-live="polite" aria-busy="true">
+                <div className="preview-loading-spinner" />
+                <span className="preview-loading-label">Updating preview…</span>
+              </div>
+            )}
           </div>
 
           {/* Floating "Edit" button next to the current selection */}
