@@ -29,6 +29,14 @@ function TemplateGenerator() {
   // Plain-text preview of the selected template — used for live match counts
   const [previewText, setPreviewText] = useState('');
 
+  // Phase 4 — one-step undo for the ad-hoc list.  Every transition captures
+  // the *previous* array as `lastSnapshot`; the Undo button restores it.
+  // Covers: popover saves, row edits, row removes, AND the wipe that fires
+  // when the user switches templates (which is the most painful case).
+  const [lastSnapshot, setLastSnapshot] = useState(null);
+  const previousAdHocRef = useRef([]);
+  const isUndoingRef = useRef(false);
+
   // D-Lite preview pane
   const [previewRendering, setPreviewRendering] = useState(false);
   const [previewError, setPreviewError] = useState(null);
@@ -401,6 +409,32 @@ function TemplateGenerator() {
   // Compute conflict map for the current ad-hoc list (used by the panel rows)
   const conflictMap = useMemo(() => detectConflicts(adHocReplacements), [adHocReplacements]);
 
+  // Phase 4 — track ad-hoc list transitions so the Undo button always has the
+  // previous state available.  Runs *after* every render where the array
+  // identity changed.  The `isUndoingRef` flag prevents the undo action
+  // itself from being captured as a new snapshot (which would let the user
+  // accidentally "redo" by clicking Undo twice).
+  useEffect(() => {
+    if (previousAdHocRef.current === adHocReplacements) return;
+    if (isUndoingRef.current) {
+      // We just undid — clear the snapshot so the button disables itself
+      // until the next genuine edit.
+      isUndoingRef.current = false;
+      setLastSnapshot(null);
+    } else if (previousAdHocRef.current.length > 0 || adHocReplacements.length > 0) {
+      // Skip pure empty→empty transitions (e.g. switching between two
+      // templates that both had no replacements).
+      setLastSnapshot(previousAdHocRef.current);
+    }
+    previousAdHocRef.current = adHocReplacements;
+  }, [adHocReplacements]);
+
+  const undoLastAdHocChange = () => {
+    if (lastSnapshot === null) return;
+    isUndoingRef.current = true;
+    setAdHocReplacements(lastSnapshot);
+  };
+
   // ── Field updates ──────────────────────────────────────────────────
   const setValue = (key) => (e) => {
     const v = e?.target?.type === 'date' ? formatHumanDate(e.target.value) : e.target.value;
@@ -489,10 +523,10 @@ function TemplateGenerator() {
   const hasPreview = !!(selectedTemplate && selectedAccount);
 
   return (
-    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', minHeight: 0 }}>
+    <div className={`tg-layout ${hasPreview ? 'tg-layout-split' : ''}`}>
 
       {/* ── LEFT PANE — controls ────────────────────────────────── */}
-      <div style={{ flex: hasPreview ? '0 0 380px' : '1', minWidth: 0 }}>
+      <div className="tg-controls-pane" style={{ flex: hasPreview ? '0 0 380px' : '1', minWidth: 0 }}>
 
         {error && <div className="alert alert-error">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
@@ -610,6 +644,8 @@ function TemplateGenerator() {
                 onChange={setAdHocReplacements}
                 previewText={previewText}
                 conflictMap={conflictMap}
+                canUndo={lastSnapshot !== null}
+                onUndo={undoLastAdHocChange}
               />
             </div>
 
@@ -630,7 +666,7 @@ function TemplateGenerator() {
 
       {/* ── RIGHT PANE — live preview ───────────────────────────── */}
       {hasPreview && (
-        <div style={{
+        <div className="tg-preview-pane" style={{
           flex: 1,
           minWidth: 0,
           position: 'sticky',
@@ -691,21 +727,32 @@ function TemplateGenerator() {
             )}
 
             {/* docx-preview renders here */}
-            <div
-              ref={previewContainerRef}
-              onMouseUp={handlePreviewMouseUp}
-              className="docx-preview-host"
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                background: '#f9fafb',
-                borderRadius: 6,
-                padding: '0.5rem',
-                opacity: previewRendering ? 0.5 : 1,
-                transition: 'opacity 0.2s',
-                cursor: 'text',
-              }}
-            />
+            <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+              <div
+                ref={previewContainerRef}
+                onMouseUp={handlePreviewMouseUp}
+                className="docx-preview-host"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  overflowY: 'auto',
+                  background: '#f9fafb',
+                  borderRadius: 6,
+                  padding: '0.5rem',
+                  opacity: previewRendering ? 0.4 : 1,
+                  transition: 'opacity 0.2s',
+                  cursor: 'text',
+                }}
+              />
+
+              {/* Phase 4 — centred spinner overlay while the preview re-renders */}
+              {previewRendering && (
+                <div className="preview-loading-overlay" aria-live="polite" aria-busy="true">
+                  <div className="preview-loading-spinner" />
+                  <span className="preview-loading-label">Updating preview…</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Floating "Edit" button next to the current selection */}
@@ -1068,7 +1115,7 @@ function renderInputForField(field, value, onChange) {
 // Ad-hoc replacements panel — find/replace for anything not pre-marked
 // ═══════════════════════════════════════════════════════════════════════════
 
-function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictMap }) {
+function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictMap, canUndo, onUndo }) {
   const addRow = () => {
     onChange([
       ...replacements,
@@ -1111,23 +1158,46 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictM
             Replace any literal text in the template — environment names, hostnames, project codes — that isn't a defined placeholder.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={addRow}
-          style={{
-            background: '#2563eb',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            padding: '0.4rem 0.75rem',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          + Add replacement
-        </button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {/* Phase 4 — one-step undo for the most recent ad-hoc list change */}
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title={canUndo ? 'Undo the most recent change to this list' : 'Nothing to undo yet'}
+            style={{
+              background: canUndo ? '#fff' : '#f3f4f6',
+              color: canUndo ? '#374151' : '#9ca3af',
+              border: `1px solid ${canUndo ? '#d1d5db' : '#e5e7eb'}`,
+              borderRadius: 6,
+              padding: '0.4rem 0.65rem',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: canUndo ? 'pointer' : 'not-allowed',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.15s, color 0.15s',
+            }}
+          >
+            ↶ Undo
+          </button>
+          <button
+            type="button"
+            onClick={addRow}
+            style={{
+              background: '#2563eb',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              padding: '0.4rem 0.75rem',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            + Add replacement
+          </button>
+        </div>
       </div>
 
       {/* Phase 3 — global conflict banner */}

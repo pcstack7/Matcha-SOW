@@ -1735,3 +1735,133 @@ select.form-control {
   background: #c0392b;
   border-color: #c0392b;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Phase 4 — Template Generator polish
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Two-pane layout container — controls + preview side by side */
+.tg-layout {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+/* Preview overlay shown while docx-preview re-renders */
+.preview-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: rgba(249, 250, 251, 0.55);
+  border-radius: 6px;
+  pointer-events: none; /* clicks pass through to the dimmed preview */
+  z-index: 5;
+}
+
+.preview-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(37, 99, 235, 0.2);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.preview-loading-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #374151;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+}
+
+/* Headers and footers rendered by docx-preview live inside absolutely-
+   positioned sections.  Make sure text is selectable so the click-to-edit
+   flow works there too. */
+.docx-preview-host header,
+.docx-preview-host footer,
+.docx-preview-host header *,
+.docx-preview-host footer * {
+  user-select: text;
+  -webkit-user-select: text;
+  pointer-events: auto;
+}
+
+/* ── Mobile / narrow viewports — stack panes vertically ───────────── */
+@media (max-width: 900px) {
+  .tg-layout.tg-layout-split {
+    flex-direction: column;
+  }
+  .tg-layout.tg-layout-split .tg-controls-pane {
+    flex: 1 1 auto !important;
+    width: 100%;
+  }
+  .tg-layout.tg-layout-split .tg-preview-pane {
+    position: static !important;     /* drop the sticky position on mobile */
+    max-height: none !important;
+    width: 100%;
+    /* Give it a sensible height when stacked so scroll-within-scroll works */
+    min-height: 60vh;
+  }
+}
+
+/* ── Print stylesheet — clean preview-only export ─────────────────── */
+@media print {
+  /* Hide chrome we don't want on paper */
+  .sidebar,
+  .tg-controls-pane,
+  .preview-edit-popover,
+  .preview-edit-fab,
+  .preview-loading-overlay,
+  .modal-footer,
+  .alert,
+  .login-container {
+    display: none !important;
+  }
+  /* Give the preview the full page */
+  .app,
+  .main-content,
+  .tg-layout,
+  .tg-preview-pane {
+    display: block !important;
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex: none !important;
+    width: 100% !important;
+  }
+  /* Reset the scale transform docx-preview applies for fit-to-pane */
+  .docx-preview-host .docx-wrapper {
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+  }
+  /* Drop the preview chrome so the document fills the printable area */
+  .docx-preview-host {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+    opacity: 1 !important;
+  }
+  /* Clear the existing highlights so they don't bleed into print */
+  .preview-target-highlight,
+  .preview-other-highlight {
+    background: transparent !important;
+    box-shadow: none !important;
+    animation: none !important;
+    color: inherit !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}
