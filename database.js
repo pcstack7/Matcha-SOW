@@ -1535,6 +1535,10 @@ export const fixedSOWTemplateOps = {
   deactivate: (id) => {
     db.prepare('UPDATE fixed_sow_templates SET is_active = 0 WHERE id = ?').run(id);
   },
+
+  delete: (id) => {
+    db.prepare('DELETE FROM fixed_sow_templates WHERE id = ?').run(id);
+  },
 };
 
 export default db;

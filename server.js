@@ -11,7 +11,9 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps } from "./database.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
+import { scanDocument } from "./services/docx-scanner.js";
+import { injectPlaceholders } from "./services/docx-injector.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -167,6 +169,27 @@ const extractionUpload = multer({
   },
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
 });
+
+// Configure multer for Fixed SOW Templates (v3 — memory storage during scan/save)
+const fixedTemplateUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.docx') {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only .docx files are allowed for Fixed SOW Templates.'));
+    }
+  },
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB — comfortably above the largest sample SOWs
+});
+
+// Ensure storage directory for processed Fixed SOW Templates exists
+const fixedTemplateDir = path.join(__dirname, 'uploads', 'fixed-templates');
+if (!fs.existsSync(fixedTemplateDir)) {
+  fs.mkdirSync(fixedTemplateDir, { recursive: true });
+  console.log('✓ Created directory: uploads/fixed-templates');
+}
 
 // Configure multer for Excel import of scope items
 const excelStorage = multer.diskStorage({
@@ -2543,6 +2566,196 @@ app.patch("/api/placeholder-definitions/:id/reactivate", isAuthenticated, requir
   } catch (err) {
     console.error("Error reactivating placeholder definition:", err);
     res.status(500).json({ error: "Failed to reactivate placeholder definition" });
+  }
+});
+
+// ============================================
+// FIXED SOW TEMPLATES ENDPOINTS (v3)
+// ============================================
+
+// Helper — parse a JSON-encoded column safely for client response
+function parsePlaceholdersJson(row) {
+  return {
+    ...row,
+    placeholders: row.placeholders ? JSON.parse(row.placeholders) : [],
+  };
+}
+
+// List all fixed templates (any authenticated user — needed by SOW Generator)
+app.get("/api/fixed-templates", isAuthenticated, (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const items = fixedSOWTemplateOps.getAll(includeInactive).map(parsePlaceholdersJson);
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching fixed templates:", err);
+    res.status(500).json({ error: "Failed to fetch fixed templates" });
+  }
+});
+
+// Get single fixed template
+app.get("/api/fixed-templates/:id", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    res.json(parsePlaceholdersJson(template));
+  } catch (err) {
+    console.error("Error fetching fixed template:", err);
+    res.status(500).json({ error: "Failed to fetch fixed template" });
+  }
+});
+
+// Scan an uploaded .docx — returns detected placeholder candidates only.
+// No DB write, no file persistence. The UI keeps the file in memory and
+// re-uploads it on the subsequent POST /api/fixed-templates call.
+app.post("/api/fixed-templates/scan", isAuthenticated, requireAdmin, fixedTemplateUpload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // Pull current placeholder library + active accounts to drive detection
+    const definitions = placeholderDefinitionOps.getAll(false).map(d => ({
+      ...d,
+      detect_regex: d.detect_regex ? JSON.parse(d.detect_regex) : [],
+      input_options: d.input_options ? JSON.parse(d.input_options) : null,
+    }));
+    const accounts = accountOps.getAll('active');
+
+    const detections = scanDocument(req.file.buffer, definitions, accounts);
+
+    res.json({
+      file_name: req.file.originalname,
+      file_size: req.file.size,
+      detections,
+      placeholder_library: definitions.map(d => ({
+        key: d.key,
+        label: d.label,
+        input_type: d.input_type,
+        data_source: d.data_source,
+        description: d.description,
+      })),
+    });
+  } catch (err) {
+    console.error("Error scanning fixed template:", err);
+    res.status(500).json({ error: err.message || "Failed to scan template" });
+  }
+});
+
+// Save a confirmed template — re-runs the injector on the uploaded buffer,
+// persists the processed file to disk, and writes the DB row.
+//
+// Multipart fields:
+//   file              — the original .docx (re-uploaded from the wizard)
+//   name              — template display name
+//   description       — optional
+//   product_id        — optional
+//   engagement_type_id — optional
+//   mappings          — JSON string: [{ key, found_text, occurrences }]
+app.post("/api/fixed-templates", isAuthenticated, requireAdmin, fixedTemplateUpload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const { name, description, product_id, engagement_type_id } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "Template name is required" });
+    }
+
+    let mappings;
+    try {
+      mappings = JSON.parse(req.body.mappings || '[]');
+    } catch (e) {
+      return res.status(400).json({ error: "mappings must be valid JSON" });
+    }
+    if (!Array.isArray(mappings)) {
+      return res.status(400).json({ error: "mappings must be an array" });
+    }
+
+    // Inject {{KEY}} markers into the document
+    const processed = injectPlaceholders(req.file.buffer, mappings);
+
+    // Persist the processed file to disk under a stable, collision-safe path
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const safeOriginal = String(req.file.originalname).replace(/[^A-Za-z0-9._-]/g, '_');
+    const storedFileName = `${uniqueSuffix}-${safeOriginal}`;
+    const storedFilePath = path.join(fixedTemplateDir, storedFileName);
+    fs.writeFileSync(storedFilePath, processed);
+
+    // Summarize the placeholder set actually embedded — useful for the UI
+    const placeholderSummary = aggregatePlaceholders(mappings);
+
+    const id = fixedSOWTemplateOps.create({
+      name: String(name).trim(),
+      description: description ? String(description).trim() : null,
+      product_id: product_id ? Number(product_id) : null,
+      engagement_type_id: engagement_type_id ? Number(engagement_type_id) : null,
+      file_name: req.file.originalname,
+      file_path: storedFilePath,
+      placeholders: placeholderSummary,
+      created_by: req.user?.id || null,
+    });
+
+    const created = fixedSOWTemplateOps.getById(id);
+    res.status(201).json(parsePlaceholdersJson(created));
+  } catch (err) {
+    console.error("Error saving fixed template:", err);
+    res.status(500).json({ error: err.message || "Failed to save template" });
+  }
+});
+
+// Helper — collapse the mapping list into a per-key summary suitable for storing
+// alongside the template (UI uses this to render the "this template has N
+// dynamic fields" badge and to drive the generation form).
+function aggregatePlaceholders(mappings) {
+  const byKey = new Map();
+  for (const m of mappings) {
+    if (!m || !m.key || !m.found_text) continue;
+    const entry = byKey.get(m.key) || { key: m.key, occurrences: 0, found_texts: [] };
+    entry.occurrences += Number(m.occurrences) || 1;
+    if (!entry.found_texts.includes(m.found_text)) {
+      entry.found_texts.push(m.found_text);
+    }
+    byKey.set(m.key, entry);
+  }
+  return [...byKey.values()];
+}
+
+// Deactivate (soft delete) a fixed template
+app.patch("/api/fixed-templates/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    fixedSOWTemplateOps.deactivate(req.params.id);
+    res.json({ message: "Template deactivated" });
+  } catch (err) {
+    console.error("Error deactivating fixed template:", err);
+    res.status(500).json({ error: "Failed to deactivate template" });
+  }
+});
+
+// Delete a fixed template entirely (admin only) — also removes the file from disk
+app.delete("/api/fixed-templates/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+
+    // Remove the processed file from disk (best-effort)
+    if (template.file_path) {
+      try {
+        fs.unlinkSync(template.file_path);
+      } catch (e) {
+        console.warn(`Could not delete file ${template.file_path}:`, e.message);
+      }
+    }
+
+    // Permanent delete from DB
+    fixedSOWTemplateOps.delete(req.params.id);
+    res.json({ message: "Template deleted" });
+  } catch (err) {
+    console.error("Error deleting fixed template:", err);
+    res.status(500).json({ error: "Failed to delete template" });
   }
 });
 
