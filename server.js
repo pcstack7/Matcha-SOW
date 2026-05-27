@@ -920,11 +920,11 @@ app.get("/api/accounts/:id", isAuthenticated, (req, res) => {
 // Create new account (Admin only)
 app.post("/api/accounts", requireAdmin, (req, res) => {
   try {
-    const { name, account_contact, email, phone, notes } = req.body;
+    const { name, account_contact, email, phone, notes, short_name, client_number, country, sites } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    const id = accountOps.create({ name, account_contact, email, phone, notes });
+    const id = accountOps.create({ name, account_contact, email, phone, notes, short_name, client_number, country, sites });
     const account = accountOps.getById(id);
     res.status(201).json(account);
   } catch (err) {
@@ -936,11 +936,11 @@ app.post("/api/accounts", requireAdmin, (req, res) => {
 // Update account (Admin only)
 app.put("/api/accounts/:id", requireAdmin, (req, res) => {
   try {
-    const { name, account_contact, email, phone, notes } = req.body;
+    const { name, account_contact, email, phone, notes, short_name, client_number, country, sites } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    accountOps.update(req.params.id, { name, account_contact, email, phone, notes });
+    accountOps.update(req.params.id, { name, account_contact, email, phone, notes, short_name, client_number, country, sites });
     const account = accountOps.getById(req.params.id);
     res.json(account);
   } catch (err) {
