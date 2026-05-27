@@ -1473,18 +1473,22 @@ select.form-control {
 
 /* ─────────────────────────────────────────────────────────────────
    DOCX-PREVIEW — styles for the live preview pane
+   Preserve natural Word page dimensions; JS applies CSS transform
+   to fit the page width inside the preview pane.
    ───────────────────────────────────────────────────────────────── */
-.docx-preview-doc {
-  font-family: 'Calibri', 'Arial', sans-serif !important;
-  font-size: 10pt !important;
+.docx-wrapper.docx-preview-doc {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
-/* Each page gets a white card-like appearance */
+/* Each rendered page is a Word "section" with explicit width/height
+   set by docx-preview (matches the source document's page setup). */
 .docx-preview-doc section {
   background: #fff !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
-  margin-bottom: 0.75rem !important;
-  border-radius: 4px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+  margin-bottom: 0.5rem !important;
+  border-radius: 2px !important;
 }
 
 /* Selection highlight in preview — pop with brand colour so it reads as actionable */
@@ -1498,6 +1502,10 @@ select.form-control {
 }
 
 /* Scrollbar inside preview */
+.docx-preview-host {
+  /* Hide horizontal overflow that the scale transform might leak */
+  overflow-x: hidden !important;
+}
 .docx-preview-host::-webkit-scrollbar { width: 8px; }
 .docx-preview-host::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
 .docx-preview-host::-webkit-scrollbar-thumb:hover { background: #9ca3af; }

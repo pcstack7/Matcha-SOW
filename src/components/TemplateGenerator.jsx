@@ -40,6 +40,36 @@ function TemplateGenerator() {
   const [previewSelection, setPreviewSelection] = useState(null); // {text, rect, paraText}
   const [editPopover, setEditPopover] = useState(null);           // {findText, replaceText, matchCount, replaceAll, paraText, position}
 
+  // Scale the rendered .docx-wrapper so the natural Word page width
+  // (~8.5in) fits inside the preview pane. Preserving the original
+  // page dimensions keeps cover-page image+text positioning accurate.
+  const applyPreviewScale = () => {
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const wrapper = container.querySelector('.docx-wrapper');
+    if (!wrapper) return;
+
+    // Reset any prior transform/box so we can measure natural size
+    wrapper.style.transform = '';
+    wrapper.style.transformOrigin = '';
+    wrapper.style.height = '';
+    wrapper.style.width = '';
+    wrapper.style.marginBottom = '';
+
+    const naturalWidth = wrapper.scrollWidth;
+    const naturalHeight = wrapper.scrollHeight;
+    const containerWidth = container.clientWidth - 8; // small padding allowance
+
+    if (naturalWidth > 0 && containerWidth > 0 && naturalWidth > containerWidth) {
+      const scale = containerWidth / naturalWidth;
+      wrapper.style.width = `${naturalWidth}px`;
+      wrapper.style.transform = `scale(${scale})`;
+      wrapper.style.transformOrigin = 'top left';
+      // Compensate for transform not shrinking the layout box
+      wrapper.style.height = `${naturalHeight * scale}px`;
+    }
+  };
+
   // ── Initial data load ──────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
@@ -163,14 +193,19 @@ function TemplateGenerator() {
         previewContainerRef.current.innerHTML = '';
         await renderAsync(arrayBuffer, previewContainerRef.current, undefined, {
           className: 'docx-preview-doc',
-          inWrapper: false,
-          ignoreWidth: true,
-          ignoreHeight: false,
+          inWrapper: true,
+          ignoreWidth: false,    // preserve natural Word page width
+          ignoreHeight: false,   // preserve natural page height
           breakPages: true,
           renderHeaders: true,
           renderFooters: true,
           renderFootnotes: true,
         });
+
+        // Fit the page width to the available pane width via CSS scale.
+        // Wait a frame so docx-preview's layout settles before measuring.
+        await new Promise((r) => requestAnimationFrame(r));
+        applyPreviewScale();
       } catch (err) {
         if (version !== previewVersionRef.current) return;
         setPreviewError('Preview could not be generated. The downloaded file will still be correct.');
@@ -182,6 +217,16 @@ function TemplateGenerator() {
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate, selectedAccount, values, adHocReplacements]);
+
+  // Re-fit the preview when the pane width changes (sidebar collapse, window resize)
+  useEffect(() => {
+    const container = previewContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => applyPreviewScale());
+    ro.observe(container);
+    return () => ro.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, selectedAccount]);
 
   // ── Click-to-edit: capture text selections within the preview ─────
   const handlePreviewMouseUp = () => {
@@ -392,7 +437,7 @@ function TemplateGenerator() {
     <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', minHeight: 0 }}>
 
       {/* ── LEFT PANE — controls ────────────────────────────────── */}
-      <div style={{ flex: hasPreview ? '0 0 420px' : '1', minWidth: 0 }}>
+      <div style={{ flex: hasPreview ? '0 0 380px' : '1', minWidth: 0 }}>
 
         {error && <div className="alert alert-error">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
