@@ -1487,9 +1487,101 @@ select.form-control {
   border-radius: 4px !important;
 }
 
+/* Selection highlight in preview — pop with brand colour so it reads as actionable */
+.docx-preview-host ::selection {
+  background: rgba(112, 124, 241, 0.35);
+  color: #1e1b4b;
+}
+.docx-preview-host ::-moz-selection {
+  background: rgba(112, 124, 241, 0.35);
+  color: #1e1b4b;
+}
+
 /* Scrollbar inside preview */
-div[ref="previewContainer"]::-webkit-scrollbar { width: 6px; }
-div[ref="previewContainer"]::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+.docx-preview-host::-webkit-scrollbar { width: 8px; }
+.docx-preview-host::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+.docx-preview-host::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ─────────────────────────────────────────────────────────────────
+   CLICK-TO-EDIT — floating "Edit" button + inline popover
+   ───────────────────────────────────────────────────────────────── */
+.preview-edit-fab {
+  z-index: 999;
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  max-width: 220px;
+  transition: transform 0.15s, box-shadow 0.15s;
+  animation: fab-pop 0.18s ease-out;
+}
+
+.preview-edit-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.45);
+}
+
+@keyframes fab-pop {
+  from { opacity: 0; transform: scale(0.85) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.preview-edit-popover {
+  z-index: 1000;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05);
+  padding: 1rem 1.1rem;
+  width: 340px;
+  border: 1px solid #e5e7eb;
+  animation: popover-in 0.18s ease-out;
+}
+
+@keyframes popover-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.preview-edit-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+.preview-edit-popover-close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.preview-edit-popover-close:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
 
 /* ─── Scope Management & shared components ─── */
 

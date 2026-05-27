@@ -36,6 +36,10 @@ function TemplateGenerator() {
   // Track a counter so we can debounce preview refreshes
   const previewVersionRef = useRef(0);
 
+  // D-Visual click-to-edit
+  const [previewSelection, setPreviewSelection] = useState(null); // {text, rect, paraText}
+  const [editPopover, setEditPopover] = useState(null);           // {findText, replaceText, matchCount, replaceAll, paraText, position}
+
   // ── Initial data load ──────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
@@ -178,6 +182,124 @@ function TemplateGenerator() {
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate, selectedAccount, values, adHocReplacements]);
+
+  // ── Click-to-edit: capture text selections within the preview ─────
+  const handlePreviewMouseUp = () => {
+    // Defer one tick so window.getSelection() reflects the final selection
+    setTimeout(() => {
+      if (editPopover) return; // don't replace selection while editing
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        setPreviewSelection(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const container = previewContainerRef.current;
+      if (!container || !container.contains(range.commonAncestorContainer)) {
+        setPreviewSelection(null);
+        return;
+      }
+      const text = sel.toString();
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length < 1) {
+        setPreviewSelection(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        setPreviewSelection(null);
+        return;
+      }
+      // Find the parent paragraph (or closest block element) for disambiguation context
+      let node = range.commonAncestorContainer;
+      if (node.nodeType === 3) node = node.parentElement; // text node → element
+      const para = node?.closest?.('p, li, td, h1, h2, h3, h4, h5, h6, div') || node;
+      const paraText = (para?.textContent || '').replace(/\s+/g, ' ').trim();
+      setPreviewSelection({ text: trimmed, rect, paraText });
+    }, 0);
+  };
+
+  // Open the inline edit popover from the current selection
+  const openEditFromSelection = () => {
+    if (!previewSelection) return;
+    const { text, rect, paraText } = previewSelection;
+    const matchCount = countMatches(previewText || '', text, { caseSensitive: true, wholeWord: false });
+    // Position popover below the selection if there's room, else above
+    const viewportH = window.innerHeight;
+    const popoverHeight = 220; // approx
+    const top = rect.bottom + popoverHeight < viewportH
+      ? rect.bottom + 10
+      : Math.max(8, rect.top - popoverHeight - 10);
+    const left = Math.min(window.innerWidth - 360, Math.max(8, rect.left));
+    setEditPopover({
+      findText: text,
+      replaceText: text,
+      matchCount,
+      replaceAll: true,
+      paraText,
+      position: { top, left },
+    });
+    setPreviewSelection(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  // Save edit → append to adHocReplacements (preview re-renders automatically)
+  const saveEditPopover = () => {
+    if (!editPopover) return;
+    const { findText, replaceText, matchCount, replaceAll, paraText } = editPopover;
+
+    // No-op if user didn't change anything
+    if (!replaceText || replaceText === findText) {
+      setEditPopover(null);
+      return;
+    }
+
+    let actualFind = findText;
+    let actualReplace = replaceText;
+
+    // When multiple matches exist AND user wants just this one, expand the
+    // find string with surrounding paragraph context so it becomes unique.
+    if (matchCount > 1 && !replaceAll && paraText) {
+      const idx = paraText.indexOf(findText);
+      if (idx >= 0) {
+        const before = paraText.substring(Math.max(0, idx - 15), idx);
+        const after = paraText.substring(idx + findText.length, Math.min(paraText.length, idx + findText.length + 15));
+        actualFind = before + findText + after;
+        actualReplace = before + replaceText + after;
+      }
+    }
+
+    setAdHocReplacements((prev) => [
+      ...prev,
+      {
+        id: `r_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        find: actualFind,
+        replace: actualReplace,
+        caseSensitive: true,
+        wholeWord: false,
+      },
+    ]);
+    setEditPopover(null);
+  };
+
+  // Escape + outside-click handlers for the popover
+  useEffect(() => {
+    if (!editPopover) return;
+    const handleEsc = (e) => { if (e.key === 'Escape') setEditPopover(null); };
+    const handleOutside = (e) => {
+      if (e.target.closest?.('.preview-edit-popover')) return;
+      if (e.target.closest?.('.preview-edit-fab')) return;
+      setEditPopover(null);
+    };
+    document.addEventListener('keydown', handleEsc);
+    // Delay so the click that opened the popover doesn't immediately close it
+    const t = setTimeout(() => document.addEventListener('mousedown', handleOutside), 100);
+    return () => {
+      document.removeEventListener('keydown', handleEsc);
+      document.removeEventListener('mousedown', handleOutside);
+      clearTimeout(t);
+    };
+  }, [editPopover]);
 
   // ── Field updates ──────────────────────────────────────────────────
   const setValue = (key) => (e) => {
@@ -456,9 +578,22 @@ function TemplateGenerator() {
               </div>
             )}
 
+            {/* Inline help — only when no selection / popover yet */}
+            {!previewSelection && !editPopover && (
+              <div style={{
+                background: '#eff6ff', border: '1px solid #bfdbfe',
+                borderRadius: 6, padding: '0.4rem 0.7rem',
+                fontSize: '0.72rem', color: '#1e40af', marginBottom: '0.5rem',
+              }}>
+                💡 <strong>Tip:</strong> drag to highlight any text in the preview, then click <strong>Edit</strong> to change it.
+              </div>
+            )}
+
             {/* docx-preview renders here */}
             <div
               ref={previewContainerRef}
+              onMouseUp={handlePreviewMouseUp}
+              className="docx-preview-host"
               style={{
                 flex: 1,
                 overflowY: 'auto',
@@ -467,9 +602,125 @@ function TemplateGenerator() {
                 padding: '0.5rem',
                 opacity: previewRendering ? 0.5 : 1,
                 transition: 'opacity 0.2s',
+                cursor: 'text',
               }}
             />
           </div>
+
+          {/* Floating "Edit" button next to the current selection */}
+          {previewSelection && !editPopover && (
+            <button
+              type="button"
+              className="preview-edit-fab"
+              style={{
+                position: 'fixed',
+                top: previewSelection.rect.top > 50
+                  ? previewSelection.rect.top - 38
+                  : previewSelection.rect.bottom + 8,
+                left: Math.min(
+                  window.innerWidth - 220,
+                  Math.max(8, previewSelection.rect.left + previewSelection.rect.width / 2 - 75)
+                ),
+              }}
+              onMouseDown={(e) => e.preventDefault()} /* don't lose selection */
+              onClick={openEditFromSelection}
+            >
+              <span style={{ fontSize: '0.95rem' }}>✏️</span>
+              Edit "{previewSelection.text.length > 16 ? previewSelection.text.slice(0, 16) + '…' : previewSelection.text}"
+            </button>
+          )}
+
+          {/* Inline edit popover */}
+          {editPopover && (
+            <div
+              className="preview-edit-popover"
+              style={{
+                position: 'fixed',
+                top: editPopover.position.top,
+                left: editPopover.position.left,
+              }}
+            >
+              <div className="preview-edit-popover-header">
+                <span>Edit text</span>
+                <button
+                  type="button"
+                  className="preview-edit-popover-close"
+                  onClick={() => setEditPopover(null)}
+                  aria-label="Cancel"
+                >×</button>
+              </div>
+
+              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: 4, marginTop: 8 }}>
+                ORIGINAL
+              </div>
+              <div style={{
+                background: '#f3f4f6',
+                padding: '0.45rem 0.65rem',
+                borderRadius: 5,
+                fontSize: '0.83rem',
+                marginBottom: 10,
+                fontFamily: 'ui-monospace, Menlo, monospace',
+                wordBreak: 'break-word',
+                color: '#1f2937',
+              }}>
+                {editPopover.findText}
+              </div>
+
+              <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: 4 }}>
+                REPLACE WITH
+              </div>
+              <input
+                type="text"
+                className="form-control"
+                value={editPopover.replaceText}
+                onChange={(e) => setEditPopover({ ...editPopover, replaceText: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveEditPopover();
+                }}
+                autoFocus
+                style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '0.85rem' }}
+              />
+
+              {editPopover.matchCount > 1 && (
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  marginTop: 10, fontSize: '0.78rem', color: '#374151',
+                  cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={editPopover.replaceAll}
+                    onChange={(e) => setEditPopover({ ...editPopover, replaceAll: e.target.checked })}
+                  />
+                  Replace all <strong style={{ color: '#1f2937' }}>{editPopover.matchCount}</strong> matches in the document
+                </label>
+              )}
+              {editPopover.matchCount === 1 && (
+                <div style={{ fontSize: '0.72rem', color: '#059669', marginTop: 8 }}>
+                  ✓ This text appears only once in the document.
+                </div>
+              )}
+              {editPopover.matchCount === 0 && (
+                <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: 8 }}>
+                  ⚠ No matches found in the document text — replacement may not apply.
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => setEditPopover(null)}
+                >Cancel</button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-small"
+                  onClick={saveEditPopover}
+                  disabled={!editPopover.replaceText || editPopover.replaceText === editPopover.findText}
+                >Save edit</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
