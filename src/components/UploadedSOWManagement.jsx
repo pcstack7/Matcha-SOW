@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EditIcon, DeactivateIcon, ActivateIcon } from './Icons';
 
 function UploadedSOWManagement({ userRole }) {
   const [uploadedSOWs, setUploadedSOWs] = useState([]);
@@ -360,30 +361,24 @@ function UploadedSOWManagement({ userRole }) {
                     </span>
                   </td>
                   <td>
-                    <div className="action-buttons">
+                    <div className="icon-btn-group">
                       <button
-                        className="btn btn-sm btn-secondary"
+                        className="icon-btn icon-btn-edit"
                         onClick={() => handleOpenModal(sow)}
-                        title="Edit"
-                      >
-                        Edit
-                      </button>
+                        data-tooltip="Edit"
+                      ><EditIcon /></button>
                       {sow.is_active ? (
                         <button
-                          className="btn btn-sm btn-danger"
+                          className="icon-btn icon-btn-deactivate"
                           onClick={() => handleDeactivate(sow.id)}
-                          title="Deactivate"
-                        >
-                          Deactivate
-                        </button>
+                          data-tooltip="Deactivate"
+                        ><DeactivateIcon /></button>
                       ) : (
                         <button
-                          className="btn btn-sm btn-success"
+                          className="icon-btn icon-btn-activate"
                           onClick={() => handleReactivate(sow.id)}
-                          title="Reactivate"
-                        >
-                          Reactivate
-                        </button>
+                          data-tooltip="Reactivate"
+                        ><ActivateIcon /></button>
                       )}
                     </div>
                   </td>

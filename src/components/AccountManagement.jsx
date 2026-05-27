@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EditIcon, DeactivateIcon, ActivateIcon } from './Icons';
 
 const EMPTY_FORM = {
   name: '',
@@ -235,30 +236,27 @@ function AccountManagement({ userRole }) {
                     </td>
                     {isAdmin && (
                       <td>
-                        <div className="action-buttons">
+                        <div className="icon-btn-group">
                           {account.is_active && (
                             <>
                               <button
-                                className="btn btn-small btn-outline"
+                                className="icon-btn icon-btn-edit"
                                 onClick={() => handleOpenModal(account)}
-                              >
-                                Edit
-                              </button>
+                                data-tooltip="Edit"
+                              ><EditIcon /></button>
                               <button
-                                className="btn btn-small btn-warning"
+                                className="icon-btn icon-btn-deactivate"
                                 onClick={() => handleDeactivate(account.id)}
-                              >
-                                Deactivate
-                              </button>
+                                data-tooltip="Deactivate"
+                              ><DeactivateIcon /></button>
                             </>
                           )}
                           {!account.is_active && (
                             <button
-                              className="btn btn-small btn-success"
+                              className="icon-btn icon-btn-activate"
                               onClick={() => handleReactivate(account.id)}
-                            >
-                              Reactivate
-                            </button>
+                              data-tooltip="Reactivate"
+                            ><ActivateIcon /></button>
                           )}
                         </div>
                       </td>

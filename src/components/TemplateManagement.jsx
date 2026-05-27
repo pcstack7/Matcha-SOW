@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EyeIcon, DeleteIcon } from './Icons';
 import { templateApi } from '../services/api';
 import { formatContent } from '../utils/formatContent';
 
@@ -179,19 +180,18 @@ function TemplateManagement() {
                     </td>
                     <td>{formatDate(template.uploaded_at)}</td>
                     <td>
-                      <button
-                        className="btn btn-small btn-primary"
-                        onClick={() => handleViewTemplate(template)}
-                        style={{ marginRight: '0.5rem' }}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="btn btn-small btn-danger"
-                        onClick={() => handleDelete(template.id)}
-                      >
-                        Delete
-                      </button>
+                      <div className="icon-btn-group">
+                        <button
+                          className="icon-btn icon-btn-view"
+                          onClick={() => handleViewTemplate(template)}
+                          data-tooltip="View"
+                        ><EyeIcon /></button>
+                        <button
+                          className="icon-btn icon-btn-delete"
+                          onClick={() => handleDelete(template.id)}
+                          data-tooltip="Delete"
+                        ><DeleteIcon /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}

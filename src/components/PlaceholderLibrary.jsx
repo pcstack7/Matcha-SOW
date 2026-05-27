@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { EditIcon, DeactivateIcon, ActivateIcon } from './Icons';
 
 const INPUT_TYPES = [
   { value: 'text',     label: 'Text input',     hint: 'Single-line free text' },
@@ -310,30 +311,27 @@ function PlaceholderLibrary({ userRole }) {
                     </td>
                     {isAdmin && (
                       <td>
-                        <div className="action-buttons">
+                        <div className="icon-btn-group">
                           {item.is_active && (
                             <>
                               <button
-                                className="btn btn-small btn-outline"
+                                className="icon-btn icon-btn-edit"
                                 onClick={() => handleOpenModal(item)}
-                              >
-                                Edit
-                              </button>
+                                data-tooltip="Edit"
+                              ><EditIcon /></button>
                               <button
-                                className="btn btn-small btn-warning"
+                                className="icon-btn icon-btn-deactivate"
                                 onClick={() => handleDeactivate(item.id)}
-                              >
-                                Deactivate
-                              </button>
+                                data-tooltip="Deactivate"
+                              ><DeactivateIcon /></button>
                             </>
                           )}
                           {!item.is_active && (
                             <button
-                              className="btn btn-small btn-success"
+                              className="icon-btn icon-btn-activate"
                               onClick={() => handleReactivate(item.id)}
-                            >
-                              Reactivate
-                            </button>
+                              data-tooltip="Reactivate"
+                            ><ActivateIcon /></button>
                           )}
                         </div>
                       </td>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EditIcon, DeleteIcon, LockIcon } from './Icons';
 
 function UserManagement() {
   const [users, setUsers] = useState([]);
@@ -268,28 +269,24 @@ function UserManagement() {
                     </td>
                     <td>{user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}</td>
                     <td>
-                      <div className="action-buttons">
+                      <div className="icon-btn-group">
                         <button
-                          className="btn btn-small btn-outline"
+                          className="icon-btn icon-btn-edit"
                           onClick={() => handleOpenModal(user)}
-                        >
-                          Edit
-                        </button>
+                          data-tooltip="Edit"
+                        ><EditIcon /></button>
                         <button
-                          className="btn btn-small btn-outline"
+                          className="icon-btn icon-btn-view"
                           onClick={() => handleOpenPasswordModal(user.id)}
                           disabled={user.auth_provider === 'azure'}
-                          title={user.auth_provider === 'azure' ? 'Password is managed by Microsoft' : 'Change password'}
-                          style={user.auth_provider === 'azure' ? { opacity: 0.45, cursor: 'not-allowed' } : {}}
-                        >
-                          Change Password
-                        </button>
+                          data-tooltip={user.auth_provider === 'azure' ? 'Managed by Microsoft' : 'Change password'}
+                          style={user.auth_provider === 'azure' ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+                        ><LockIcon /></button>
                         <button
-                          className="btn btn-small btn-danger"
+                          className="icon-btn icon-btn-delete"
                           onClick={() => handleDelete(user.id)}
-                        >
-                          Delete
-                        </button>
+                          data-tooltip="Delete"
+                        ><DeleteIcon /></button>
                       </div>
                     </td>
                   </tr>

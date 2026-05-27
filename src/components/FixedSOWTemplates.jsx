@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { DeleteIcon } from './Icons';
 
 const CONFIDENCE_COLOR = {
   high:   { dot: '#10b981', label: 'High',   bg: '#ecfdf5' },
@@ -156,13 +157,12 @@ function FixedSOWTemplates({ userRole }) {
                     <td style={{ fontSize: '0.85rem' }}>{t.created_by_display_name || '—'}</td>
                     {isAdmin && (
                       <td>
-                        <div className="action-buttons">
+                        <div className="icon-btn-group">
                           <button
-                            className="btn btn-small btn-warning"
+                            className="icon-btn icon-btn-delete"
                             onClick={() => handleDelete(t.id, t.name)}
-                          >
-                            Delete
-                          </button>
+                            data-tooltip="Delete template"
+                          ><DeleteIcon /></button>
                         </div>
                       </td>
                     )}

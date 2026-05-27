@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EyeIcon, DownloadIcon, DeleteIcon } from './Icons';
 import { sowApi, exportApi } from '../services/api';
 import { formatContent } from '../utils/formatContent';
 
@@ -137,25 +138,22 @@ function SOWList() {
                     <td>{sow.created_by_display_name || sow.created_by_username || '-'}</td>
                     <td>{formatDate(sow.created_at)}</td>
                     <td>
-                      <div className="action-buttons">
+                      <div className="icon-btn-group">
                         <button
-                          className="btn btn-small btn-outline"
+                          className="icon-btn icon-btn-view"
                           onClick={() => setSelectedSOW(sow)}
-                        >
-                          View
-                        </button>
+                          data-tooltip="View"
+                        ><EyeIcon /></button>
                         <button
-                          className="btn btn-small btn-secondary"
+                          className="icon-btn icon-btn-download"
                           onClick={() => handleExport(sow.id, 'pdf')}
-                        >
-                          PDF
-                        </button>
+                          data-tooltip="Export PDF"
+                        ><DownloadIcon /></button>
                         <button
-                          className="btn btn-small btn-danger"
+                          className="icon-btn icon-btn-delete"
                           onClick={() => handleDelete(sow.id)}
-                        >
-                          Delete
-                        </button>
+                          data-tooltip="Delete"
+                        ><DeleteIcon /></button>
                       </div>
                     </td>
                   </tr>
