@@ -269,7 +269,7 @@ function App() {
     <div className={`app ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
 
-        {/* ── Brand header ───────────────────────────────────────── */}
+        {/* ── Brand header (logo + title + collapse toggle) ───────── */}
         <div className="sidebar-brand">
           <img src="/altera-graphicmark-rev.svg" alt="Altera" className="sidebar-logo" />
           {!collapsed && (
@@ -278,16 +278,17 @@ function App() {
               <span className="sidebar-subtitle">Statement of Work</span>
             </div>
           )}
+          <button
+            className="sidebar-toggle"
+            onClick={toggleSidebar}
+            title={collapsed ? 'Expand menu' : 'Collapse menu'}
+            aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}
+          >
+            {collapsed ? <Icons.ChevronRight /> : <Icons.ChevronLeft />}
+          </button>
         </div>
 
-        {/* ── Collapse toggle ────────────────────────────────────── */}
-        <button className="sidebar-toggle" onClick={toggleSidebar} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
-          <span className="sidebar-toggle-icon">
-            {collapsed ? <Icons.ChevronRight /> : <Icons.ChevronLeft />}
-          </span>
-        </button>
-
-        {/* ── User info ──────────────────────────────────────────── */}
+        {/* ── User info + logout (always visible at top) ──────────── */}
         <div className={`sidebar-user ${collapsed ? 'collapsed' : ''}`}>
           <div className="user-avatar" title={collapsed ? (user.display_name || user.username) : undefined}>
             {user.display_name?.[0] || user.username[0]}
@@ -298,6 +299,15 @@ function App() {
               <div className="user-role">{user.role}</div>
             </div>
           )}
+          <button
+            className="sidebar-logout-btn"
+            onClick={handleLogout}
+            title="Logout"
+            aria-label="Logout"
+            data-tooltip="Logout"
+          >
+            <Icons.Logout />
+          </button>
         </div>
 
         {/* ── Navigation ────────────────────────────────────────── */}
@@ -321,19 +331,6 @@ function App() {
             );
           })}
         </nav>
-
-        {/* ── Logout ────────────────────────────────────────────── */}
-        <div className="sidebar-footer-actions">
-          <button
-            className="nav-item nav-item-logout"
-            onClick={handleLogout}
-            title="Logout"
-            data-tooltip="Logout"
-          >
-            <span className="nav-icon"><Icons.Logout /></span>
-            {!collapsed && <span className="nav-label">Logout</span>}
-          </button>
-        </div>
 
       </aside>
       <main className="main-content">

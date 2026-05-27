@@ -58,15 +58,22 @@ body {
   min-width: 64px;
 }
 
-/* ── Brand ── */
+/* ── Brand (logo + title + inline collapse toggle) ── */
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 1.25rem 1rem 1rem;
+  padding: 1rem;
   border-bottom: 1px solid rgba(255,255,255,0.12);
-  min-height: 72px;
+  min-height: 64px;
   overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-brand {
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem;
+  min-height: auto;
 }
 
 .sidebar-logo {
@@ -81,6 +88,8 @@ body {
   flex-direction: column;
   overflow: hidden;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .sidebar-title {
@@ -88,58 +97,52 @@ body {
   font-weight: 700;
   color: var(--primary-white);
   letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-subtitle {
   font-size: 0.72rem;
   color: rgba(255,255,255,0.6);
   margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ── Collapse toggle ── */
+/* ── Collapse toggle (inside brand bar, always visible) ── */
 .sidebar-toggle {
-  position: absolute;
-  top: 20px;
-  right: -13px;
+  flex-shrink: 0;
   width: 26px;
   height: 26px;
-  border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.25);
-  background: var(--primary-purple);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
   color: rgba(255,255,255,0.85);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
-  z-index: 20;
+  transition: all 0.18s;
   padding: 0;
 }
 
 .sidebar-toggle:hover {
-  background: var(--primary-light);
-  border-color: var(--primary-light);
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.4);
   color: #fff;
 }
 
-.sidebar-toggle-icon {
-  display: flex;
-  align-items: center;
+.sidebar-toggle svg {
   width: 14px;
   height: 14px;
 }
 
-.sidebar-toggle-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* ── User info ── */
+/* ── User info card + inline logout button ── */
 .sidebar-user {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
   margin: 0.75rem 0.5rem;
   background: rgba(255,255,255,0.08);
   border-radius: 10px;
@@ -148,9 +151,91 @@ body {
 }
 
 .sidebar-user.collapsed {
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.55rem 0.4rem;
+  margin: 0.6rem 0.4rem;
+}
+
+.sidebar-user .user-details {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-user .user-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--primary-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user .user-role {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.6);
+  text-transform: capitalize;
+  margin-top: 1px;
+}
+
+/* Logout button — inline at right (expanded) / below avatar (collapsed) */
+.sidebar-logout-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.75);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 0.75rem 0.5rem;
-  margin: 0.75rem 0.5rem;
+  transition: all 0.18s;
+  padding: 0;
+  position: relative;
+}
+
+.sidebar-logout-btn:hover {
+  background: rgba(245,110,123,0.25);
+  border-color: rgba(245,110,123,0.5);
+  color: #fca5a5;
+}
+
+.sidebar-logout-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Tooltip for logout in collapsed mode */
+.sidebar.collapsed .sidebar-logout-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: #fff;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+.sidebar.collapsed .sidebar-logout-btn[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: #1e293b;
+  pointer-events: none;
+  z-index: 999;
 }
 
 /* ── Nav ── */
@@ -202,15 +287,6 @@ body {
   color: var(--primary-white);
   font-weight: 600;
   box-shadow: inset 3px 0 0 var(--primary-light);
-}
-
-.nav-item-logout {
-  color: rgba(255,255,255,0.6);
-}
-
-.nav-item-logout:hover {
-  background: rgba(245,110,123,0.2);
-  color: #fca5a5;
 }
 
 /* Icon */
@@ -270,13 +346,6 @@ body {
   justify-content: center;
   padding: 0.65rem 0;
   margin: 0.1rem 0.35rem;
-}
-
-/* ── Footer logout area ── */
-.sidebar-footer-actions {
-  padding: 0.5rem 0 1rem;
-  border-top: 1px solid rgba(255,255,255,0.1);
-  margin-top: auto;
 }
 
 /* ── Main content shifts with sidebar ── */
