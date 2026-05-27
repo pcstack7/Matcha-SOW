@@ -163,10 +163,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    checkAuthStatus();
+    // Detect a fresh post-SSO redirect (?sso=1) and strip the param from the URL
+    const params = new URLSearchParams(window.location.search);
+    const isPostSSO = params.get('sso') === '1';
+    if (isPostSSO) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    checkAuthStatus(isPostSSO);
   }, []);
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = async (retryOnce = false) => {
+    let deferLoading = false; // true when we hand off setLoading to the retry closure
     try {
       const response = await fetch('/auth/session', { credentials: 'include' });
       const data = await response.json();
@@ -174,6 +181,29 @@ function App() {
       if (data.authenticated && data.user) {
         setUser(data.user);
         setIsAuthenticated(true);
+      } else if (retryOnce) {
+        // After SSO redirect the SQLite session write might not have flushed
+        // before this first request arrived.  Keep the loading spinner and
+        // wait 800 ms before retrying.
+        deferLoading = true;
+        setTimeout(async () => {
+          try {
+            const r2 = await fetch('/auth/session', { credentials: 'include' });
+            const d2 = await r2.json();
+            if (d2.authenticated && d2.user) {
+              setUser(d2.user);
+              setIsAuthenticated(true);
+            } else {
+              setUser(null);
+              setIsAuthenticated(false);
+            }
+          } catch {
+            setUser(null);
+            setIsAuthenticated(false);
+          } finally {
+            setLoading(false);
+          }
+        }, 800);
       } else {
         setUser(null);
         setIsAuthenticated(false);
@@ -183,7 +213,9 @@ function App() {
       setUser(null);
       setIsAuthenticated(false);
     } finally {
-      setLoading(false);
+      // Don't clear the loading flag when we have an active retry in-flight;
+      // the retry's own finally block will do it.
+      if (!deferLoading) setLoading(false);
     }
   };
 
@@ -291,7 +323,7 @@ function App() {
         {/* ── User info + logout (always visible at top) ──────────── */}
         <div className={`sidebar-user ${collapsed ? 'collapsed' : ''}`}>
           <div className="user-avatar" title={collapsed ? (user.display_name || user.username) : undefined}>
-            {user.display_name?.[0] || user.username[0]}
+            {(user.display_name?.[0] || user.username?.[0] || '?')}
           </div>
           {!collapsed && (
             <div className="user-details">

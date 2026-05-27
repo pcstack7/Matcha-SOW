@@ -341,8 +341,21 @@ app.get("/auth/azure/callback", (req, res, next) => {
         return res.redirect("/?sso_error=session_error");
       }
       console.log("Azure SSO login successful for user:", user.username, "role:", user.role);
-      // Redirect to SPA root — React's checkAuthStatus() picks up the session
-      return res.redirect("/");
+      // Explicitly save the session BEFORE redirecting so the SQLite store has
+      // durably committed the session ID by the time the browser follows the
+      // redirect and React calls /auth/session.  req.login() calls save()
+      // internally but an explicit call here ensures the async write has
+      // fully flushed before the 302 is sent.
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error("Session save error after Azure SSO:", saveErr);
+          // Continue anyway — the in-memory session is still valid for this
+          // request cycle so the redirect will likely work.
+        }
+        // Add ?sso=1 so the React app can detect a fresh post-SSO page load
+        // and retry the auth check once if the first attempt returns 401.
+        return res.redirect("/?sso=1");
+      });
     });
   })(req, res, next);
 });
