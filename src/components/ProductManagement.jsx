@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { EditIcon, DeactivateIcon, ActivateIcon } from './Icons';
 
 function ProductManagement({ userRole }) {
   const [products, setProducts] = useState([]);
@@ -229,30 +230,27 @@ function ProductManagement({ userRole }) {
                     </td>
                     {isAdmin && (
                       <td>
-                        <div className="action-buttons">
+                        <div className="icon-btn-group">
                           {product.is_active && (
                             <>
                               <button
-                                className="btn btn-small btn-outline"
+                                className="icon-btn icon-btn-edit"
                                 onClick={() => handleOpenModal(product)}
-                              >
-                                Edit
-                              </button>
+                                data-tooltip="Edit"
+                              ><EditIcon /></button>
                               <button
-                                className="btn btn-small btn-warning"
+                                className="icon-btn icon-btn-deactivate"
                                 onClick={() => handleDeactivate(product.id)}
-                              >
-                                Deactivate
-                              </button>
+                                data-tooltip="Deactivate"
+                              ><DeactivateIcon /></button>
                             </>
                           )}
                           {!product.is_active && (
                             <button
-                              className="btn btn-small btn-success"
+                              className="icon-btn icon-btn-activate"
                               onClick={() => handleReactivate(product.id)}
-                            >
-                              Reactivate
-                            </button>
+                              data-tooltip="Reactivate"
+                            ><ActivateIcon /></button>
                           )}
                         </div>
                       </td>

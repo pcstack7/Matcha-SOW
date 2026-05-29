@@ -11,7 +11,13 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps } from "./database.js";
+import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
+import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
+import { scanDocument, extractText } from "./services/docx-scanner.js";
+import { injectPlaceholders } from "./services/docx-injector.js";
+import { cleanVersionTables } from "./services/docx-version-cleaner.js";
+import { generateDocument } from "./services/docx-generator.js";
+import { applyAdHocReplacements } from "./services/docx-replacer.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -168,6 +174,27 @@ const extractionUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
 });
 
+// Configure multer for Fixed SOW Templates (v3 — memory storage during scan/save)
+const fixedTemplateUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.docx') {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only .docx files are allowed for Fixed SOW Templates.'));
+    }
+  },
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB — comfortably above the largest sample SOWs
+});
+
+// Ensure storage directory for processed Fixed SOW Templates exists
+const fixedTemplateDir = path.join(__dirname, 'uploads', 'fixed-templates');
+if (!fs.existsSync(fixedTemplateDir)) {
+  fs.mkdirSync(fixedTemplateDir, { recursive: true });
+  console.log('✓ Created directory: uploads/fixed-templates');
+}
+
 // Configure multer for Excel import of scope items
 const excelStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -300,23 +327,45 @@ app.get("/auth/azure", (req, res, next) => {
 // Azure AD callback — Microsoft redirects back here with auth code (responseMode: 'query')
 app.get("/auth/azure/callback", (req, res, next) => {
   passport.authenticate("azuread-openidconnect", (err, user, info) => {
+    // Resolve the frontend base once so all redirects go to the same origin.
+    // In local dev FRONTEND_URL=http://localhost:5173; in production leave unset.
+    const fe = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     if (err) {
       console.error("Azure SSO callback error:", JSON.stringify(err, null, 2));
-      return res.redirect(`/?sso_error=${encodeURIComponent(err.message || 'server_error')}`);
+      return res.redirect(`${fe}/?sso_error=${encodeURIComponent(err.message || 'server_error')}`);
     }
     if (!user) {
       const msg = (info && info.message) ? info.message : "Authentication failed";
       console.warn("Azure SSO login rejected — info:", JSON.stringify(info, null, 2));
-      return res.redirect(`/?sso_error=${encodeURIComponent(msg)}`);
+      return res.redirect(`${fe}/?sso_error=${encodeURIComponent(msg)}`);
     }
     req.login(user, (loginErr) => {
       if (loginErr) {
         console.error("Session error after Azure SSO:", loginErr);
-        return res.redirect("/?sso_error=session_error");
+        return res.redirect(`${fe}/?sso_error=session_error`);
       }
       console.log("Azure SSO login successful for user:", user.username, "role:", user.role);
-      // Redirect to SPA root — React's checkAuthStatus() picks up the session
-      return res.redirect("/");
+      // Explicitly save the session BEFORE redirecting so the SQLite store has
+      // durably committed the session ID by the time the browser follows the
+      // redirect and React calls /auth/session.  req.login() calls save()
+      // internally but an explicit call here ensures the async write has
+      // fully flushed before the 302 is sent.
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error("Session save error after Azure SSO:", saveErr);
+          // Continue anyway — the in-memory session is still valid for this
+          // request cycle so the redirect will likely work.
+        }
+        // Add ?sso=1 so the React app can detect a fresh post-SSO page load
+        // and retry the auth check once if the first attempt returns 401.
+        //
+        // FRONTEND_URL lets local dev work correctly:
+        //   • In production:  not set → relative redirect stays on port 3000
+        //   • In local dev:   set to http://localhost:5173 → redirect lands on
+        //     the Vite dev server (which serves the latest hot-reloaded React
+        //     code) rather than port 3000 (which only has the static build).
+        return res.redirect(`${fe}/?sso=1`);
+      });
     });
   })(req, res, next);
 });
@@ -920,11 +969,11 @@ app.get("/api/accounts/:id", isAuthenticated, (req, res) => {
 // Create new account (Admin only)
 app.post("/api/accounts", requireAdmin, (req, res) => {
   try {
-    const { name, account_contact, email, phone, notes } = req.body;
+    const { name, account_contact, email, phone, notes, short_name, client_number, country, sites } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    const id = accountOps.create({ name, account_contact, email, phone, notes });
+    const id = accountOps.create({ name, account_contact, email, phone, notes, short_name, client_number, country, sites });
     const account = accountOps.getById(id);
     res.status(201).json(account);
   } catch (err) {
@@ -936,11 +985,11 @@ app.post("/api/accounts", requireAdmin, (req, res) => {
 // Update account (Admin only)
 app.put("/api/accounts/:id", requireAdmin, (req, res) => {
   try {
-    const { name, account_contact, email, phone, notes } = req.body;
+    const { name, account_contact, email, phone, notes, short_name, client_number, country, sites } = req.body;
     if (!name) {
       return res.status(400).json({ error: "Account name is required" });
     }
-    accountOps.update(req.params.id, { name, account_contact, email, phone, notes });
+    accountOps.update(req.params.id, { name, account_contact, email, phone, notes, short_name, client_number, country, sites });
     const account = accountOps.getById(req.params.id);
     res.json(account);
   } catch (err) {
@@ -1558,23 +1607,14 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
 
     doc.pipe(res);
 
-    // Main Header
-    doc.font('Helvetica-Bold').fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
-    doc.moveDown();
+    // Front matter: cover (p1) + index (p2) + version & approval (p3).
+    // Leaves the cursor on a fresh page for the body content below.
+    renderPdfFrontMatter(doc, sow);
 
-    // Client Info Header
-    doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text("Client Information", { underline: true });
-    doc.moveDown(0.5);
-
-    // Client details
-    doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
-    doc.text(`Account: ${sow.account_name}`);
-    if (sow.account_contact) doc.text(`Contact: ${sow.account_contact}`);
-    doc.text(`Date: ${new Date(sow.created_at).toLocaleDateString()}`);
-    doc.moveDown();
-
-    // Parse and format content with tables, bullets, and inline markdown
-    const lines = sow.content.split('\n');
+    // Parse and format content with tables, bullets, and inline markdown.
+    // Strip the AI's leading Project/Client/Date/Version block — the cover
+    // now carries that information.
+    const lines = stripLeadingMetaBlock(sow.content).split('\n');
     let i = 0;
 
     // Helper function to render text with inline bold markdown
@@ -1622,15 +1662,15 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
         }
       }
 
-      // Check if line is a main header
-      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
-        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      // Check if line is a main header (1–3 hashes; matches DOCX export)
+      if (line.match(/^#{1,3}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').trim();
         doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text(headerText);
         doc.moveDown(0.5);
       }
-      // Check if line is a subheader
-      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
-        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      // Check if line is a subheader (#### and deeper, or a fully bold line)
+      else if (line.match(/^#{4,6}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
         doc.font('Helvetica-Bold').fontSize(14).fillColor("#383392").text(subHeaderText);
         doc.moveDown(0.3);
       }
@@ -1721,9 +1761,11 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       return textRuns.length > 0 ? textRuns : [new TextRun({ text, font: "Verdana", size: 19 })];
     };
 
-    // Parse content and create formatted paragraphs/tables
+    // Parse content and create formatted paragraphs/tables.
+    // Strip the AI's leading Project/Client/Date/Version block — the cover
+    // page now carries that information.
     const contentElements = [];
-    const lines = sow.content.split('\n');
+    const lines = stripLeadingMetaBlock(sow.content).split('\n');
     let i = 0;
 
     while (i < lines.length) {
@@ -1800,11 +1842,18 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
         }
       }
 
-      // Check if line is a main header
-      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
-        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      // Check if line is a main header.
+      // AI-generated SOWs use ### for top-level sections (e.g. "### **1.0
+      // Solution Overview**") and #### for subsections, so 1–3 hashes map to
+      // Heading 1. Strip any ** bold wrapper from the heading text.
+      if (line.match(/^#{1,3}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').trim();
         contentElements.push(
           new Paragraph({
+            // Real Word heading style so the Table of Contents (page 2) and
+            // Word's navigation pane both pick it up. The explicit run props
+            // keep the brand colour/size; the heading drives the outline level.
+            heading: HeadingLevel.HEADING_1,
             children: [
               new TextRun({
                 text: headerText,
@@ -1818,11 +1867,12 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
           })
         );
       }
-      // Check if line is a subheader
-      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
-        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      // Check if line is a subheader (#### and deeper, or a fully bold line)
+      else if (line.match(/^#{4,6}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
         contentElements.push(
           new Paragraph({
+            heading: HeadingLevel.HEADING_2,
             children: [
               new TextRun({
                 text: subHeaderText,
@@ -1887,60 +1937,17 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       i++;
     }
 
+    // Front matter: cover (p1) + index/TOC (p2) + version & approval (p3),
+    // then the parsed body content.
+    const frontMatter = buildDocxFrontMatter(sow);
+
     const doc = new Document({
+      features: { updateFields: true }, // prompt Word to populate the TOC page numbers on open
       sections: [
         {
           properties: {},
           children: [
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "Statement of Work",
-                  bold: true,
-                  font: "Verdana",
-                  size: 48, // 24pt
-                  color: "151744",
-                }),
-              ],
-              alignment: "center",
-              spacing: { after: 400 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "Client Information",
-                  bold: true,
-                  font: "Verdana",
-                  size: 32, // 16pt
-                  color: "707CF1",
-                  underline: {},
-                }),
-              ],
-              spacing: { before: 200, after: 100 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({ text: "Account: ", bold: true, font: "Verdana", size: 19 }),
-                new TextRun({ text: sow.account_name, font: "Verdana", size: 19 }),
-              ],
-            }),
-            ...(sow.account_contact
-              ? [
-                  new Paragraph({
-                    children: [
-                      new TextRun({ text: "Contact: ", bold: true, font: "Verdana", size: 19 }),
-                      new TextRun({ text: sow.account_contact, font: "Verdana", size: 19 }),
-                    ],
-                  }),
-                ]
-              : []),
-            new Paragraph({
-              children: [
-                new TextRun({ text: "Date: ", bold: true, font: "Verdana", size: 19 }),
-                new TextRun({ text: new Date(sow.created_at).toLocaleDateString(), font: "Verdana", size: 19 }),
-              ],
-              spacing: { after: 300 },
-            }),
+            ...frontMatter,
             ...contentElements,
           ],
         },
@@ -2432,6 +2439,411 @@ Do not include any explanation, markdown fences, or text outside the JSON object
     localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
     console.error("Error extracting from documents:", err);
     res.status(500).json({ error: "Failed to extract content from documents" });
+  }
+});
+
+// ============================================
+// PLACEHOLDER LIBRARY ENDPOINTS (v3 — fixed SOW templates)
+// ============================================
+
+// List placeholder definitions — readable by all authenticated users (needed by generator UI)
+app.get("/api/placeholder-definitions", isAuthenticated, (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const items = placeholderDefinitionOps.getAll(includeInactive);
+    // Parse JSON-encoded fields for the client
+    const parsed = items.map(item => ({
+      ...item,
+      detect_regex: item.detect_regex ? JSON.parse(item.detect_regex) : [],
+      input_options: item.input_options ? JSON.parse(item.input_options) : null,
+    }));
+    res.json(parsed);
+  } catch (err) {
+    console.error("Error fetching placeholder definitions:", err);
+    res.status(500).json({ error: "Failed to fetch placeholder definitions" });
+  }
+});
+
+// Create placeholder definition (admin only)
+app.post("/api/placeholder-definitions", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const { key, label, description, data_source, detect_regex, input_type, input_options, sort_order } = req.body;
+    if (!key || !label) {
+      return res.status(400).json({ error: "key and label are required" });
+    }
+    // Normalize the key — uppercase, alphanumeric + underscores only
+    const normalizedKey = String(key).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!normalizedKey) {
+      return res.status(400).json({ error: "key must contain at least one alphanumeric character" });
+    }
+    const id = placeholderDefinitionOps.create({
+      key: normalizedKey,
+      label,
+      description,
+      data_source,
+      detect_regex: Array.isArray(detect_regex) ? detect_regex : [],
+      input_type: input_type || 'text',
+      input_options: Array.isArray(input_options) && input_options.length > 0 ? input_options : null,
+      sort_order: Number(sort_order) || 0,
+    });
+    const created = placeholderDefinitionOps.getById(id);
+    res.status(201).json({
+      ...created,
+      detect_regex: created.detect_regex ? JSON.parse(created.detect_regex) : [],
+      input_options: created.input_options ? JSON.parse(created.input_options) : null,
+    });
+  } catch (err) {
+    if (String(err.message || '').includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: "A placeholder with that key already exists" });
+    }
+    console.error("Error creating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to create placeholder definition" });
+  }
+});
+
+// Update placeholder definition (admin only) — key is immutable
+app.put("/api/placeholder-definitions/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const existing = placeholderDefinitionOps.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Placeholder definition not found" });
+
+    const { label, description, data_source, detect_regex, input_type, input_options, sort_order } = req.body;
+    if (!label) return res.status(400).json({ error: "label is required" });
+
+    placeholderDefinitionOps.update(req.params.id, {
+      label,
+      description,
+      data_source,
+      detect_regex: Array.isArray(detect_regex) ? detect_regex : [],
+      input_type: input_type || 'text',
+      input_options: Array.isArray(input_options) && input_options.length > 0 ? input_options : null,
+      sort_order: Number(sort_order) || 0,
+    });
+    const updated = placeholderDefinitionOps.getById(req.params.id);
+    res.json({
+      ...updated,
+      detect_regex: updated.detect_regex ? JSON.parse(updated.detect_regex) : [],
+      input_options: updated.input_options ? JSON.parse(updated.input_options) : null,
+    });
+  } catch (err) {
+    console.error("Error updating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to update placeholder definition" });
+  }
+});
+
+// Deactivate placeholder definition (admin only)
+app.patch("/api/placeholder-definitions/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    placeholderDefinitionOps.deactivate(req.params.id);
+    res.json({ message: "Placeholder definition deactivated" });
+  } catch (err) {
+    console.error("Error deactivating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to deactivate placeholder definition" });
+  }
+});
+
+// Reactivate placeholder definition (admin only)
+app.patch("/api/placeholder-definitions/:id/reactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    placeholderDefinitionOps.reactivate(req.params.id);
+    res.json({ message: "Placeholder definition reactivated" });
+  } catch (err) {
+    console.error("Error reactivating placeholder definition:", err);
+    res.status(500).json({ error: "Failed to reactivate placeholder definition" });
+  }
+});
+
+// ============================================
+// FIXED SOW TEMPLATES ENDPOINTS (v3)
+// ============================================
+
+// Helper — parse a JSON-encoded column safely for client response
+function parsePlaceholdersJson(row) {
+  return {
+    ...row,
+    placeholders: row.placeholders ? JSON.parse(row.placeholders) : [],
+  };
+}
+
+// List all fixed templates (any authenticated user — needed by SOW Generator)
+app.get("/api/fixed-templates", isAuthenticated, (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    const items = fixedSOWTemplateOps.getAll(includeInactive).map(parsePlaceholdersJson);
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching fixed templates:", err);
+    res.status(500).json({ error: "Failed to fetch fixed templates" });
+  }
+});
+
+// Get single fixed template
+app.get("/api/fixed-templates/:id", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    res.json(parsePlaceholdersJson(template));
+  } catch (err) {
+    console.error("Error fetching fixed template:", err);
+    res.status(500).json({ error: "Failed to fetch fixed template" });
+  }
+});
+
+// Scan an uploaded .docx — returns detected placeholder candidates only.
+// No DB write, no file persistence. The UI keeps the file in memory and
+// re-uploads it on the subsequent POST /api/fixed-templates call.
+app.post("/api/fixed-templates/scan", isAuthenticated, requireAdmin, fixedTemplateUpload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    // Strip any pre-existing revision-history table contents before scanning.
+    // Otherwise old version-row text (dates, author names, change descriptions)
+    // would pollute placeholder detection.
+    const { buffer: cleanedBuffer, tablesCleared } = cleanVersionTables(req.file.buffer);
+
+    // Pull current placeholder library + active accounts to drive detection
+    const definitions = placeholderDefinitionOps.getAll(false).map(d => ({
+      ...d,
+      detect_regex: d.detect_regex ? JSON.parse(d.detect_regex) : [],
+      input_options: d.input_options ? JSON.parse(d.input_options) : null,
+    }));
+    const accounts = accountOps.getAll('active');
+
+    const detections = scanDocument(cleanedBuffer, definitions, accounts);
+
+    res.json({
+      file_name: req.file.originalname,
+      file_size: req.file.size,
+      detections,
+      version_tables_cleared: tablesCleared,
+      placeholder_library: definitions.map(d => ({
+        key: d.key,
+        label: d.label,
+        input_type: d.input_type,
+        data_source: d.data_source,
+        description: d.description,
+      })),
+    });
+  } catch (err) {
+    console.error("Error scanning fixed template:", err);
+    res.status(500).json({ error: err.message || "Failed to scan template" });
+  }
+});
+
+// Save a confirmed template — re-runs the injector on the uploaded buffer,
+// persists the processed file to disk, and writes the DB row.
+//
+// Multipart fields:
+//   file              — the original .docx (re-uploaded from the wizard)
+//   name              — template display name
+//   description       — optional
+//   product_id        — optional
+//   engagement_type_id — optional
+//   mappings          — JSON string: [{ key, found_text, occurrences }]
+app.post("/api/fixed-templates", isAuthenticated, requireAdmin, fixedTemplateUpload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const { name, description, product_id, engagement_type_id } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "Template name is required" });
+    }
+
+    let mappings;
+    try {
+      mappings = JSON.parse(req.body.mappings || '[]');
+    } catch (e) {
+      return res.status(400).json({ error: "mappings must be valid JSON" });
+    }
+    if (!Array.isArray(mappings)) {
+      return res.status(400).json({ error: "mappings must be an array" });
+    }
+
+    // Empty any revision-history table rows BEFORE injecting placeholders.
+    // The persisted template must not retain version entries from the
+    // original source document — those belong to the previous engagement.
+    const { buffer: cleanedBuffer } = cleanVersionTables(req.file.buffer);
+
+    // Inject {{KEY}} markers into the cleaned document
+    const processed = injectPlaceholders(cleanedBuffer, mappings);
+
+    // Persist the processed file to disk under a stable, collision-safe path
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const safeOriginal = String(req.file.originalname).replace(/[^A-Za-z0-9._-]/g, '_');
+    const storedFileName = `${uniqueSuffix}-${safeOriginal}`;
+    const storedFilePath = path.join(fixedTemplateDir, storedFileName);
+    fs.writeFileSync(storedFilePath, processed);
+
+    // Summarize the placeholder set actually embedded — useful for the UI
+    const placeholderSummary = aggregatePlaceholders(mappings);
+
+    const id = fixedSOWTemplateOps.create({
+      name: String(name).trim(),
+      description: description ? String(description).trim() : null,
+      product_id: product_id ? Number(product_id) : null,
+      engagement_type_id: engagement_type_id ? Number(engagement_type_id) : null,
+      file_name: req.file.originalname,
+      file_path: storedFilePath,
+      placeholders: placeholderSummary,
+      created_by: req.user?.id || null,
+    });
+
+    const created = fixedSOWTemplateOps.getById(id);
+    res.status(201).json(parsePlaceholdersJson(created));
+  } catch (err) {
+    console.error("Error saving fixed template:", err);
+    res.status(500).json({ error: err.message || "Failed to save template" });
+  }
+});
+
+// Helper — collapse the mapping list into a per-key summary suitable for storing
+// alongside the template (UI uses this to render the "this template has N
+// dynamic fields" badge and to drive the generation form).
+function aggregatePlaceholders(mappings) {
+  const byKey = new Map();
+  for (const m of mappings) {
+    if (!m || !m.key || !m.found_text) continue;
+    const entry = byKey.get(m.key) || { key: m.key, occurrences: 0, found_texts: [] };
+    entry.occurrences += Number(m.occurrences) || 1;
+    if (!entry.found_texts.includes(m.found_text)) {
+      entry.found_texts.push(m.found_text);
+    }
+    byKey.set(m.key, entry);
+  }
+  return [...byKey.values()];
+}
+
+// Deactivate (soft delete) a fixed template
+app.patch("/api/fixed-templates/:id/deactivate", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    fixedSOWTemplateOps.deactivate(req.params.id);
+    res.json({ message: "Template deactivated" });
+  } catch (err) {
+    console.error("Error deactivating fixed template:", err);
+    res.status(500).json({ error: "Failed to deactivate template" });
+  }
+});
+
+// Delete a fixed template entirely (admin only) — also removes the file from disk
+app.delete("/api/fixed-templates/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+
+    // Remove the processed file from disk (best-effort)
+    if (template.file_path) {
+      try {
+        fs.unlinkSync(template.file_path);
+      } catch (e) {
+        console.warn(`Could not delete file ${template.file_path}:`, e.message);
+      }
+    }
+
+    // Permanent delete from DB
+    fixedSOWTemplateOps.delete(req.params.id);
+    res.json({ message: "Template deleted" });
+  } catch (err) {
+    console.error("Error deleting fixed template:", err);
+    res.status(500).json({ error: "Failed to delete template" });
+  }
+});
+
+// Generate a filled .docx by substituting placeholder values into a template.
+// Streams the result back as a downloadable file. No server-side persistence.
+app.post("/api/fixed-templates/:id/generate", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+
+    const { placeholder_values, ad_hoc_replacements } = req.body || {};
+    if (!placeholder_values || typeof placeholder_values !== 'object') {
+      return res.status(400).json({ error: "placeholder_values must be an object" });
+    }
+
+    // Read the processed template (already contains {{KEY}} markers)
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file is missing on the server. Please re-upload the template." });
+    }
+    const templateBuffer = fs.readFileSync(template.file_path);
+
+    // 1. Fill the defined placeholders via docxtemplater
+    let filled = generateDocument(templateBuffer, placeholder_values);
+
+    // 2. Apply any user-supplied ad-hoc find/replace pairs on top
+    if (Array.isArray(ad_hoc_replacements) && ad_hoc_replacements.length > 0) {
+      filled = applyAdHocReplacements(filled, ad_hoc_replacements);
+    }
+
+    // Build a friendly filename: <client>_<template>_<YYYY-MM-DD>.docx
+    const clientLabel =
+      placeholder_values.CLIENT_SHORT_NAME ||
+      placeholder_values.CLIENT_FULL_NAME ||
+      'Client';
+    const today = new Date().toISOString().slice(0, 10);
+    const sanitize = (s) => String(s).replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 50).replace(/^_+|_+$/g, '');
+    const outputName = `${sanitize(clientLabel)}_${sanitize(template.name)}_${today}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputName}"`);
+    res.setHeader('Content-Length', filled.length);
+    res.send(filled);
+  } catch (err) {
+    console.error("Error generating fixed SOW:", err);
+    res.status(500).json({ error: err.message || "Failed to generate document" });
+  }
+});
+
+// Render a filled template as a .docx blob for in-browser preview.
+// Same pipeline as /generate but without the Content-Disposition header
+// (not a download — the client renders it via docx-preview).
+app.post("/api/fixed-templates/:id/render-preview", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file missing on server" });
+    }
+    const { placeholder_values = {}, ad_hoc_replacements = [] } = req.body || {};
+
+    const templateBuffer = fs.readFileSync(template.file_path);
+    let filled = generateDocument(templateBuffer, placeholder_values);
+    if (Array.isArray(ad_hoc_replacements) && ad_hoc_replacements.length > 0) {
+      filled = applyAdHocReplacements(filled, ad_hoc_replacements);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Length', filled.length);
+    res.send(filled);
+  } catch (err) {
+    console.error("Error rendering preview:", err);
+    res.status(500).json({ error: err.message || "Failed to render preview" });
+  }
+});
+
+// Preview the raw text of a template (used by the client to compute live
+// match counts as the user types ad-hoc replacements).
+app.get("/api/fixed-templates/:id/preview-text", isAuthenticated, (req, res) => {
+  try {
+    const template = fixedSOWTemplateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.is_active) return res.status(400).json({ error: "Template is inactive" });
+    if (!fs.existsSync(template.file_path)) {
+      return res.status(500).json({ error: "Template file is missing on the server. Please re-upload the template." });
+    }
+    const buffer = fs.readFileSync(template.file_path);
+    const { text } = extractText(buffer);
+    res.json({ text });
+  } catch (err) {
+    console.error("Error reading template text:", err);
+    res.status(500).json({ error: err.message || "Failed to read template text" });
   }
 });
 

@@ -35,87 +35,324 @@ body {
   min-height: 100vh;
 }
 
-/* Sidebar */
+/* ─────────────────────────────────────────────────────────────────
+   SIDEBAR — collapsible, icon-driven
+   Expanded: 240px   Collapsed: 64px
+   ───────────────────────────────────────────────────────────────── */
 .sidebar {
-  width: 280px;
+  width: 240px;
+  min-width: 240px;
   background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-purple) 100%);
   color: var(--primary-white);
-  padding: 2rem 0;
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  transition: width 0.25s ease, min-width 0.25s ease;
+  overflow: hidden;
+  position: relative;
+  z-index: 10;
 }
 
-.sidebar-header {
-  padding: 0 1.5rem 2rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+.sidebar.collapsed {
+  width: 64px;
+  min-width: 64px;
 }
 
-.sidebar-header-top {
+/* ── Brand (logo + title + inline collapse toggle) ── */
+.sidebar-brand {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  min-height: 64px;
+  overflow: hidden;
 }
 
-.sidebar-graphicmark {
-  height: 40px;
-  width: auto;
+.sidebar.collapsed .sidebar-brand {
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem;
+  min-height: auto;
 }
 
-.logout-icon-btn {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  color: rgba(255, 255, 255, 0.8);
+.sidebar-logo {
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary-white);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-subtitle {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.6);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Collapse toggle (inside brand bar, always visible) ── */
+.sidebar-toggle {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.85);
   cursor: pointer;
-  padding: 0.4rem 0.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.18s;
+  padding: 0;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.4);
+  color: #fff;
+}
+
+.sidebar-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── User info card + inline logout button ── */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  margin: 0.75rem 0.5rem;
+  background: rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: padding 0.25s;
+}
+
+.sidebar-user.collapsed {
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.55rem 0.4rem;
+  margin: 0.6rem 0.4rem;
+}
+
+.sidebar-user .user-details {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-user .user-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--primary-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user .user-role {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.6);
+  text-transform: capitalize;
+  margin-top: 1px;
+}
+
+/* Logout button — inline at right (expanded) / below avatar (collapsed) */
+.sidebar-logout-btn {
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.75);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.18s;
+  padding: 0;
+  position: relative;
 }
 
-.logout-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.6);
-  color: var(--primary-white);
+.sidebar-logout-btn:hover {
+  background: rgba(245,110,123,0.25);
+  border-color: rgba(245,110,123,0.5);
+  color: #fca5a5;
 }
 
-.sidebar-header h1 {
-  font-size: 1.75rem;
-  margin-bottom: 0.25rem;
-  color: var(--primary-white);
+.sidebar-logout-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
-.sidebar-header p {
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.8);
+/* Tooltip for logout in collapsed mode */
+.sidebar.collapsed .sidebar-logout-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: #fff;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
 }
 
+.sidebar.collapsed .sidebar-logout-btn[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: #1e293b;
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ── Nav ── */
 .sidebar-nav {
   flex: 1;
-  padding: 1.5rem 0;
+  padding: 0.5rem 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.sidebar-nav::-webkit-scrollbar { display: none; }
+
+.nav-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 0.4rem 0.75rem;
 }
 
 .nav-item {
-  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  margin: 0.1rem 0.35rem;
+  width: calc(100% - 0.7rem);
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255,255,255,0.8);
   cursor: pointer;
-  transition: all 0.3s;
-  border-left: 4px solid transparent;
-  color: var(--primary-white);
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 400;
+  transition: all 0.18s;
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .nav-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-left-color: var(--primary-light);
+  background: rgba(255,255,255,0.12);
+  color: var(--primary-white);
 }
 
 .nav-item.active {
-  background-color: rgba(112, 124, 241, 0.2);
-  border-left-color: var(--primary-light);
+  background: rgba(112,124,241,0.28);
+  color: var(--primary-white);
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--primary-light);
+}
+
+/* Icon */
+.nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Label */
+.nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.2s;
+}
+
+/* Tooltip (shown in collapsed mode via title attr — CSS tooltip enhancement) */
+.sidebar.collapsed .nav-item[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: #fff;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+
+.sidebar.collapsed .nav-item[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: #1e293b;
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* Collapsed — center the icons */
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0.65rem 0;
+  margin: 0.1rem 0.35rem;
+}
+
+/* ── Main content shifts with sidebar ── */
+.app {
+  display: flex;
+  min-height: 100vh;
+  transition: none;
 }
 
 /* Main Content */
@@ -205,6 +442,15 @@ body {
 
 .btn-danger:hover:not(:disabled) {
   background-color: #f04555;
+}
+
+.btn-warning {
+  background-color: #f59e0b;
+  color: #fff;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #d97706;
 }
 
 .btn-outline {
@@ -509,6 +755,84 @@ select.form-control {
   gap: 0.5rem;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   ICON BUTTONS — replaces text-label action buttons in tables
+   ───────────────────────────────────────────────────────────────── */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Tooltip */
+.icon-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #fff;
+  padding: 0.25rem 0.55rem;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 500;
+}
+
+.icon-btn[data-tooltip]:hover::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: #1e293b;
+  pointer-events: none;
+  z-index: 500;
+}
+
+/* Variants */
+.icon-btn-edit   { background: #eff6ff; color: #2563eb; }
+.icon-btn-edit:hover   { background: #dbeafe; }
+
+.icon-btn-delete  { background: #fef2f2; color: #dc2626; }
+.icon-btn-delete:hover  { background: #fee2e2; }
+
+.icon-btn-deactivate { background: #fffbeb; color: #d97706; }
+.icon-btn-deactivate:hover { background: #fef3c7; }
+
+.icon-btn-activate   { background: #f0fdf4; color: #16a34a; }
+.icon-btn-activate:hover   { background: #dcfce7; }
+
+.icon-btn-view   { background: #f8fafc; color: #475569; }
+.icon-btn-view:hover   { background: #f1f5f9; }
+
+.icon-btn-download { background: #f0f9ff; color: #0284c7; }
+.icon-btn-download:hover { background: #e0f2fe; }
+
+/* Group spacing */
+.icon-btn-group {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 /* Empty State */
 .empty-state {
   text-align: center;
@@ -650,16 +974,16 @@ select.form-control {
   color: var(--primary-purple);
 }
 
-/* User Info in Sidebar */
+/* User Info in Sidebar (now .sidebar-user — kept for backward-compat) */
 .user-info {
-  padding: 1rem 1.5rem;
-  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  background-color: rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  margin: 0 1rem 1.5rem;
+  gap: 0.75rem;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin: 0.75rem 0.5rem;
+  overflow: hidden;
 }
 
 .user-avatar {
@@ -1156,6 +1480,177 @@ select.form-control {
   text-decoration: underline;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   DOCX-PREVIEW — styles for the live preview pane
+   Preserve natural Word page dimensions; JS applies CSS transform
+   to fit the page width inside the preview pane.
+   ───────────────────────────────────────────────────────────────── */
+.docx-wrapper.docx-preview-doc {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Each rendered page is a Word "section" with explicit width/height
+   set by docx-preview (matches the source document's page setup). */
+.docx-preview-doc section {
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+  margin-bottom: 0.5rem !important;
+  border-radius: 2px !important;
+}
+
+/* Selection highlight in preview — pop with brand colour so it reads as actionable */
+.docx-preview-host ::selection {
+  background: rgba(112, 124, 241, 0.35);
+  color: #1e1b4b;
+}
+.docx-preview-host ::-moz-selection {
+  background: rgba(112, 124, 241, 0.35);
+  color: #1e1b4b;
+}
+
+/* Scrollbar inside preview */
+.docx-preview-host {
+  /* Hide horizontal overflow that the scale transform might leak */
+  overflow-x: hidden !important;
+}
+.docx-preview-host::-webkit-scrollbar { width: 8px; }
+.docx-preview-host::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+.docx-preview-host::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ─────────────────────────────────────────────────────────────────
+   CLICK-TO-EDIT — floating "Edit" button + inline popover
+   ───────────────────────────────────────────────────────────────── */
+.preview-edit-fab {
+  z-index: 999;
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  max-width: 220px;
+  transition: transform 0.15s, box-shadow 0.15s;
+  animation: fab-pop 0.18s ease-out;
+}
+
+.preview-edit-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.45);
+}
+
+@keyframes fab-pop {
+  from { opacity: 0; transform: scale(0.85) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.preview-edit-popover {
+  z-index: 1000;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05);
+  padding: 1rem 1.1rem;
+  width: 340px;
+  border: 1px solid #e5e7eb;
+  animation: popover-in 0.18s ease-out;
+}
+
+@keyframes popover-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.preview-edit-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+.preview-edit-popover-close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.preview-edit-popover-close:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PHASE 3 — Occurrence highlighting inside the preview
+   ─────────────────────────────────────────────────────────────────
+   Two flavours of mark:
+     .preview-target-highlight — the specific occurrence the user selected
+                                 (strong orange ring, always visible)
+     .preview-other-highlight  — sibling occurrences that will ALSO be
+                                 replaced when "Replace all" is checked
+   ───────────────────────────────────────────────────────────────── */
+.docx-preview-host mark.preview-target-highlight {
+  background: #fed7aa;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px #f97316, 0 0 0 4px rgba(249, 115, 22, 0.25);
+  animation: highlight-pulse 1.2s ease-in-out infinite;
+}
+
+.docx-preview-host mark.preview-other-highlight {
+  background: #fef3c7;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fbbf24;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px #f97316, 0 0 0 4px rgba(249, 115, 22, 0.25); }
+  50%      { box-shadow: 0 0 0 2px #f97316, 0 0 0 6px rgba(249, 115, 22, 0.10); }
+}
+
+/* Conflict warning banner inside the popover */
+.preview-edit-conflict {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: #78350f;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* Row-level conflict ring in the ad-hoc replacements list */
+.adhoc-row-conflict {
+  border-color: #fbbf24 !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.18);
+}
+
 /* ─── Scope Management & shared components ─── */
 
 .tab-nav {
@@ -1239,4 +1734,137 @@ select.form-control {
 .btn-danger:hover {
   background: #c0392b;
   border-color: #c0392b;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Phase 4 — Template Generator polish
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Two-pane layout container — controls + preview side by side */
+.tg-layout {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+/* Preview indicator shown while docx-preview re-renders.
+   Floats centred over the card without covering it — the dimmed preview
+   underneath still shows through and remains scrollable. */
+.preview-loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  pointer-events: none; /* clicks pass through to the dimmed preview */
+  z-index: 5;
+}
+
+.preview-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(37, 99, 235, 0.2);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.preview-loading-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+}
+
+/* Headers and footers rendered by docx-preview live inside absolutely-
+   positioned sections.  Make sure text is selectable so the click-to-edit
+   flow works there too. */
+.docx-preview-host header,
+.docx-preview-host footer,
+.docx-preview-host header *,
+.docx-preview-host footer * {
+  user-select: text;
+  -webkit-user-select: text;
+  pointer-events: auto;
+}
+
+/* ── Mobile / narrow viewports — stack panes vertically ───────────── */
+@media (max-width: 900px) {
+  .tg-layout.tg-layout-split {
+    flex-direction: column;
+  }
+  .tg-layout.tg-layout-split .tg-controls-pane {
+    flex: 1 1 auto !important;
+    width: 100%;
+  }
+  .tg-layout.tg-layout-split .tg-preview-pane {
+    position: static !important;     /* drop the sticky position on mobile */
+    max-height: none !important;
+    width: 100%;
+    /* Give it a sensible height when stacked so scroll-within-scroll works */
+    min-height: 60vh;
+  }
+}
+
+/* ── Print stylesheet — clean preview-only export ─────────────────── */
+@media print {
+  /* Hide chrome we don't want on paper */
+  .sidebar,
+  .tg-controls-pane,
+  .preview-edit-popover,
+  .preview-edit-fab,
+  .preview-loading-overlay,
+  .modal-footer,
+  .alert,
+  .login-container {
+    display: none !important;
+  }
+  /* Give the preview the full page */
+  .app,
+  .main-content,
+  .tg-layout,
+  .tg-preview-pane {
+    display: block !important;
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex: none !important;
+    width: 100% !important;
+  }
+  /* Reset the scale transform docx-preview applies for fit-to-pane */
+  .docx-preview-host .docx-wrapper {
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+  }
+  /* Drop the preview chrome so the document fills the printable area */
+  .docx-preview-host {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+    opacity: 1 !important;
+  }
+  /* Clear the existing highlights so they don't bleed into print */
+  .preview-target-highlight,
+  .preview-other-highlight {
+    background: transparent !important;
+    box-shadow: none !important;
+    animation: none !important;
+    color: inherit !important;
+  }
+  body {
+    background: #fff !important;
+  }
 }

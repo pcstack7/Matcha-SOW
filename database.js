@@ -67,6 +67,31 @@ function migrateDatabase() {
     console.log('Engagement types table migration skipped');
   }
 
+  // Add v3 columns to accounts (short_name, client_number, country, sites)
+  try {
+    const accountsV3Info = db.prepare("PRAGMA table_info(accounts)").all();
+    const colNames = accountsV3Info.map(c => c.name);
+
+    if (!colNames.includes('short_name')) {
+      console.log('Migrating: Adding short_name column to accounts...');
+      db.exec(`ALTER TABLE accounts ADD COLUMN short_name TEXT`);
+    }
+    if (!colNames.includes('client_number')) {
+      console.log('Migrating: Adding client_number column to accounts...');
+      db.exec(`ALTER TABLE accounts ADD COLUMN client_number TEXT`);
+    }
+    if (!colNames.includes('country')) {
+      console.log('Migrating: Adding country column to accounts...');
+      db.exec(`ALTER TABLE accounts ADD COLUMN country TEXT`);
+    }
+    if (!colNames.includes('sites')) {
+      console.log('Migrating: Adding sites column to accounts...');
+      db.exec(`ALTER TABLE accounts ADD COLUMN sites TEXT`);
+    }
+  } catch (err) {
+    console.log('Accounts v3 migration skipped:', err.message);
+  }
+
   // Add assumption_set_ids and out_of_scope_set_ids to sows if they don't exist
   try {
     const sowTableInfo = db.prepare("PRAGMA table_info(sows)").all();
@@ -250,12 +275,267 @@ function initializeDatabase() {
     )
   `);
 
+  // Placeholder Definitions table (v3 — fixed SOW template feature)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS placeholder_definitions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      key           TEXT NOT NULL UNIQUE,
+      label         TEXT NOT NULL,
+      description   TEXT,
+      data_source   TEXT,
+      detect_regex  TEXT DEFAULT '[]',
+      input_type    TEXT NOT NULL DEFAULT 'text',
+      input_options TEXT,
+      is_active     INTEGER DEFAULT 1,
+      sort_order    INTEGER DEFAULT 0,
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Fixed SOW Templates table (v3 — uploaded .docx templates with injected placeholders)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fixed_sow_templates (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      name               TEXT NOT NULL,
+      description        TEXT,
+      product_id         INTEGER,
+      engagement_type_id INTEGER,
+      file_name          TEXT NOT NULL,
+      file_path          TEXT NOT NULL,
+      placeholders       TEXT NOT NULL DEFAULT '[]',
+      is_active          INTEGER DEFAULT 1,
+      created_by         INTEGER,
+      created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL,
+      FOREIGN KEY (engagement_type_id) REFERENCES engagement_types (id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+    )
+  `);
+
   console.log('Database initialized successfully');
+}
+
+// Seed the placeholder definitions library (runs once — skips if rows already exist)
+function seedPlaceholderDefinitions() {
+  const count = db.prepare('SELECT COUNT(*) as count FROM placeholder_definitions').get();
+  if (count.count > 0) return;
+
+  const insert = db.prepare(`
+    INSERT INTO placeholder_definitions
+      (key, label, description, data_source, detect_regex, input_type, input_options, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const placeholders = [
+    // ── Client Identity ──────────────────────────────────────────────
+    {
+      key: 'CLIENT_FULL_NAME',
+      label: 'Client Full Legal Name',
+      description: 'Full registered entity name (e.g. St Luke\'s Medical Center Global City Inc)',
+      data_source: 'accounts.name',
+      detect_regex: [],
+      input_type: 'account',
+      input_options: null,
+      sort_order: 1,
+    },
+    {
+      key: 'CLIENT_SHORT_NAME',
+      label: 'Client Short Name / Acronym',
+      description: 'Acronym used throughout the document body (e.g. SLMC, SAH)',
+      data_source: 'accounts.short_name',
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 2,
+    },
+    {
+      key: 'CLIENT_NUMBER',
+      label: 'Client Account Number',
+      description: 'CRM or account number (e.g. 10311837)',
+      data_source: 'accounts.client_number',
+      detect_regex: ['\\bClient\\s*#\\s*(\\d{5,10})\\b'],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 3,
+    },
+    {
+      key: 'CLIENT_COUNTRY',
+      label: 'Client Country',
+      description: 'Country where the client is located (e.g. Philippines, Australia)',
+      data_source: 'accounts.country',
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 4,
+    },
+    {
+      key: 'CLIENT_SITES',
+      label: 'Client Sites / Facilities',
+      description: 'Site names referenced in the document (e.g. Quezon City and Global City)',
+      data_source: 'accounts.sites',
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 5,
+    },
+    // ── Document Metadata ────────────────────────────────────────────
+    {
+      key: 'QUOTE_NUMBER',
+      label: 'Quote / Order Number',
+      description: 'Quote or order reference number (e.g. 545655)',
+      data_source: null,
+      detect_regex: ['\\bQuote\\s*#\\s*(\\d{5,8})\\b', '\\bOrder\\s*#\\s*(\\d{5,8})\\b'],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 6,
+    },
+    {
+      key: 'SOW_DATE',
+      label: 'SOW Date',
+      description: 'Date of the Statement of Work (e.g. 23 February 2026)',
+      data_source: null,
+      detect_regex: ['\\b\\d{1,2}\\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}\\b'],
+      input_type: 'date',
+      input_options: null,
+      sort_order: 7,
+    },
+    {
+      key: 'SOW_VERSION',
+      label: 'Document Version',
+      description: 'Version number of this document (e.g. 1.0, 9.0)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 8,
+    },
+    {
+      key: 'PROJECT_TITLE',
+      label: 'Project Title',
+      description: 'Descriptive title of the engagement (e.g. Opal Upgrade)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 9,
+    },
+    // ── Financial ────────────────────────────────────────────────────
+    {
+      key: 'TOTAL_FEE',
+      label: 'Total Fee Amount',
+      description: 'Total fee for the engagement as a number (e.g. 148520)',
+      data_source: null,
+      detect_regex: ['\\$\\s*[\\d,]+(?:\\.\\d{2})?'],
+      input_type: 'number',
+      input_options: null,
+      sort_order: 10,
+    },
+    {
+      key: 'CURRENCY',
+      label: 'Currency',
+      description: 'Currency code for fees (e.g. USD, AUD)',
+      data_source: null,
+      detect_regex: ['\\b(USD|AUD|PHP|SGD|NZD|INR|GBP|EUR)\\b'],
+      input_type: 'dropdown',
+      input_options: JSON.stringify(['USD', 'AUD', 'PHP', 'SGD', 'NZD', 'INR', 'GBP', 'EUR']),
+      sort_order: 11,
+    },
+    {
+      key: 'FEE_VALIDITY_DAYS',
+      label: 'Fee Validity Period',
+      description: 'How long the quoted fees are valid (e.g. 90 days)',
+      data_source: null,
+      detect_regex: ['\\b(\\d+)\\s+days?\\b'],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 12,
+    },
+    {
+      key: 'PAYMENT_TERMS',
+      label: 'Payment Terms',
+      description: 'Description of payment milestones and schedule',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'textarea',
+      input_options: null,
+      sort_order: 13,
+    },
+    // ── Engagement ───────────────────────────────────────────────────
+    {
+      key: 'TIMELINE_MONTHS',
+      label: 'Project Timeline',
+      description: 'Duration of the project in words (e.g. nine (9))',
+      data_source: null,
+      detect_regex: ['\\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s+\\(\\d+\\)\\b'],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 14,
+    },
+    {
+      key: 'NUM_FACILITIES',
+      label: 'Number of Facilities / Sites',
+      description: 'Total number of client sites in scope (e.g. 2)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'number',
+      input_options: null,
+      sort_order: 15,
+    },
+    {
+      key: 'NUM_EFORMS',
+      label: 'Number of eForms',
+      description: 'Number of eForms to be created (for eForms engagements)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'number',
+      input_options: null,
+      sort_order: 16,
+    },
+    {
+      key: 'PRODUCT_FROM_VERSION',
+      label: 'Upgrade From Version',
+      description: 'Current product version being upgraded from (e.g. v21.2)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 17,
+    },
+    {
+      key: 'PRODUCT_TO_VERSION',
+      label: 'Upgrade To Version',
+      description: 'Target product version being upgraded to (e.g. v22.1)',
+      data_source: null,
+      detect_regex: [],
+      input_type: 'text',
+      input_options: null,
+      sort_order: 18,
+    },
+  ];
+
+  const seedAll = db.transaction(() => {
+    for (const p of placeholders) {
+      insert.run(
+        p.key,
+        p.label,
+        p.description,
+        p.data_source,
+        JSON.stringify(p.detect_regex),
+        p.input_type,
+        p.input_options,
+        p.sort_order
+      );
+    }
+  });
+
+  seedAll();
+  console.log(`Placeholder definitions seeded: ${placeholders.length} entries`);
 }
 
 // Initialize the database
 initializeDatabase();
 migrateDatabase();
+seedPlaceholderDefinitions();
 
 // User operations
 export const userOps = {
@@ -366,15 +646,19 @@ export const accountOps = {
 
   create: (account) => {
     const stmt = db.prepare(`
-      INSERT INTO accounts (name, account_contact, email, phone, notes)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO accounts (name, account_contact, email, phone, notes, short_name, client_number, country, sites)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       account.name,
       account.account_contact || null,
       account.email || null,
       account.phone || null,
-      account.notes || null
+      account.notes || null,
+      account.short_name || null,
+      account.client_number || null,
+      account.country || null,
+      account.sites || null
     );
     return result.lastInsertRowid;
   },
@@ -382,7 +666,8 @@ export const accountOps = {
   update: (id, account) => {
     const stmt = db.prepare(`
       UPDATE accounts
-      SET name = ?, account_contact = ?, email = ?, phone = ?, notes = ?
+      SET name = ?, account_contact = ?, email = ?, phone = ?, notes = ?,
+          short_name = ?, client_number = ?, country = ?, sites = ?
       WHERE id = ?
     `);
     stmt.run(
@@ -391,6 +676,10 @@ export const accountOps = {
       account.email || null,
       account.phone || null,
       account.notes || null,
+      account.short_name || null,
+      account.client_number || null,
+      account.country || null,
+      account.sites || null,
       id
     );
   },
@@ -453,6 +742,7 @@ export const sowOps = {
       SELECT s.*,
              a.name as account_name,
              a.account_contact as account_contact,
+             a.client_number as client_number,
              t.name as template_name,
              p.name as product_name,
              et.name as engagement_type_name,
@@ -474,6 +764,7 @@ export const sowOps = {
       SELECT s.*,
              a.name as account_name,
              a.account_contact as account_contact,
+             a.client_number as client_number,
              t.name as template_name,
              p.name as product_name,
              et.name as engagement_type_name,
@@ -1116,6 +1407,140 @@ export const scopeSetOps = {
   removeItem: (setId, itemId) => {
     db.prepare(`DELETE FROM scope_set_items WHERE set_id = ? AND item_id = ?`).run(setId, itemId);
   }
+};
+
+// Placeholder Definition operations (v3)
+export const placeholderDefinitionOps = {
+  getAll: (includeInactive = false) => {
+    const where = includeInactive ? '' : 'WHERE is_active = 1';
+    return db.prepare(
+      `SELECT * FROM placeholder_definitions ${where} ORDER BY sort_order ASC, id ASC`
+    ).all();
+  },
+
+  getById: (id) => {
+    return db.prepare('SELECT * FROM placeholder_definitions WHERE id = ?').get(id);
+  },
+
+  create: (placeholder) => {
+    const stmt = db.prepare(`
+      INSERT INTO placeholder_definitions
+        (key, label, description, data_source, detect_regex, input_type, input_options, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      placeholder.key,
+      placeholder.label,
+      placeholder.description || null,
+      placeholder.data_source || null,
+      placeholder.detect_regex ? JSON.stringify(placeholder.detect_regex) : '[]',
+      placeholder.input_type || 'text',
+      placeholder.input_options ? JSON.stringify(placeholder.input_options) : null,
+      placeholder.sort_order || 0
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, placeholder) => {
+    db.prepare(`
+      UPDATE placeholder_definitions
+      SET label = ?, description = ?, data_source = ?, detect_regex = ?,
+          input_type = ?, input_options = ?, sort_order = ?
+      WHERE id = ?
+    `).run(
+      placeholder.label,
+      placeholder.description || null,
+      placeholder.data_source || null,
+      placeholder.detect_regex ? JSON.stringify(placeholder.detect_regex) : '[]',
+      placeholder.input_type || 'text',
+      placeholder.input_options ? JSON.stringify(placeholder.input_options) : null,
+      placeholder.sort_order || 0,
+      id
+    );
+  },
+
+  deactivate: (id) => {
+    db.prepare('UPDATE placeholder_definitions SET is_active = 0 WHERE id = ?').run(id);
+  },
+
+  reactivate: (id) => {
+    db.prepare('UPDATE placeholder_definitions SET is_active = 1 WHERE id = ?').run(id);
+  },
+};
+
+// Fixed SOW Template operations (v3)
+export const fixedSOWTemplateOps = {
+  getAll: (includeInactive = false) => {
+    const where = includeInactive ? '' : 'WHERE fst.is_active = 1';
+    return db.prepare(`
+      SELECT fst.*,
+             p.name  AS product_name,
+             et.name AS engagement_type_name,
+             u.display_name AS created_by_display_name
+      FROM fixed_sow_templates fst
+      LEFT JOIN products p        ON fst.product_id         = p.id
+      LEFT JOIN engagement_types et ON fst.engagement_type_id = et.id
+      LEFT JOIN users u           ON fst.created_by         = u.id
+      ${where}
+      ORDER BY fst.created_at DESC
+    `).all();
+  },
+
+  getById: (id) => {
+    return db.prepare(`
+      SELECT fst.*,
+             p.name  AS product_name,
+             et.name AS engagement_type_name,
+             u.display_name AS created_by_display_name
+      FROM fixed_sow_templates fst
+      LEFT JOIN products p        ON fst.product_id         = p.id
+      LEFT JOIN engagement_types et ON fst.engagement_type_id = et.id
+      LEFT JOIN users u           ON fst.created_by         = u.id
+      WHERE fst.id = ?
+    `).get(id);
+  },
+
+  create: (template) => {
+    const stmt = db.prepare(`
+      INSERT INTO fixed_sow_templates
+        (name, description, product_id, engagement_type_id, file_name, file_path, placeholders, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      template.name,
+      template.description || null,
+      template.product_id || null,
+      template.engagement_type_id || null,
+      template.file_name,
+      template.file_path,
+      template.placeholders ? JSON.stringify(template.placeholders) : '[]',
+      template.created_by || null
+    );
+    return result.lastInsertRowid;
+  },
+
+  update: (id, template) => {
+    db.prepare(`
+      UPDATE fixed_sow_templates
+      SET name = ?, description = ?, product_id = ?, engagement_type_id = ?, placeholders = ?
+      WHERE id = ?
+    `).run(
+      template.name,
+      template.description || null,
+      template.product_id || null,
+      template.engagement_type_id || null,
+      template.placeholders ? JSON.stringify(template.placeholders) : '[]',
+      id
+    );
+  },
+
+  deactivate: (id) => {
+    db.prepare('UPDATE fixed_sow_templates SET is_active = 0 WHERE id = ?').run(id);
+  },
+
+  delete: (id) => {
+    db.prepare('DELETE FROM fixed_sow_templates WHERE id = ?').run(id);
+  },
 };
 
 export default db;
