@@ -287,30 +287,24 @@ app.post("/auth/login", (req, res, next) => {
 
 // Logout
 app.post("/auth/logout", (req, res) => {
-  // Hard deadline: always respond within 4 s even if the session store hangs.
-  // connect-sqlite3's session.save() (called internally by req.logout()) can
-  // block indefinitely under lock contention on EC2, causing a 504 from Caddy.
-  let responded = false;
-  const finish = () => {
-    if (responded) return;
-    responded = true;
-    res.clearCookie("connect.sid");
-    res.json({ message: "Logout successful" });
-  };
-  const timer = setTimeout(() => {
-    console.warn("Logout: session store did not respond in time — forcing finish");
-    finish();
-  }, 4000);
+  // Clear the cookie and respond immediately — this is what actually logs the
+  // user out from the browser's perspective.  The session store cleanup
+  // (req.logout + req.session.destroy) runs fire-and-forget in the background
+  // so EC2 SQLite latency never delays the response.
+  res.clearCookie("connect.sid");
+  res.json({ message: "Logout successful" });
 
-  req.logout((logoutErr) => {
-    if (logoutErr) console.error("Passport logout error:", logoutErr);
-    // Destroy the session record in SQLite (more reliable than save()).
-    req.session.destroy((destroyErr) => {
-      if (destroyErr) console.error("Session destroy error:", destroyErr);
-      clearTimeout(timer);
-      finish();
+  // Background cleanup — errors are logged but do not affect the user.
+  try {
+    req.logout((logoutErr) => {
+      if (logoutErr) console.error("Passport logout error:", logoutErr);
+      req.session.destroy((destroyErr) => {
+        if (destroyErr) console.error("Session destroy error:", destroyErr);
+      });
     });
-  });
+  } catch (e) {
+    console.error("Logout cleanup error:", e);
+  }
 });
 
 // Get current session/user
