@@ -11,6 +11,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
+import { buildDocxFrontMatter, renderPdfFrontMatter } from "./services/sow-frontmatter.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1606,20 +1607,9 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
 
     doc.pipe(res);
 
-    // Main Header
-    doc.font('Helvetica-Bold').fontSize(24).fillColor("#151744").text("Statement of Work", { align: "center" });
-    doc.moveDown();
-
-    // Client Info Header
-    doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text("Client Information", { underline: true });
-    doc.moveDown(0.5);
-
-    // Client details
-    doc.font('Helvetica').fontSize(9.5).fillColor("#000000");
-    doc.text(`Account: ${sow.account_name}`);
-    if (sow.account_contact) doc.text(`Contact: ${sow.account_contact}`);
-    doc.text(`Date: ${new Date(sow.created_at).toLocaleDateString()}`);
-    doc.moveDown();
+    // Front matter: cover (p1) + index (p2) + version & approval (p3).
+    // Leaves the cursor on a fresh page for the body content below.
+    renderPdfFrontMatter(doc, sow);
 
     // Parse and format content with tables, bullets, and inline markdown
     const lines = sow.content.split('\n');
@@ -1670,15 +1660,15 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
         }
       }
 
-      // Check if line is a main header
-      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
-        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      // Check if line is a main header (1–3 hashes; matches DOCX export)
+      if (line.match(/^#{1,3}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').trim();
         doc.font('Helvetica-Bold').fontSize(16).fillColor("#707CF1").text(headerText);
         doc.moveDown(0.5);
       }
-      // Check if line is a subheader
-      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
-        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      // Check if line is a subheader (#### and deeper, or a fully bold line)
+      else if (line.match(/^#{4,6}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
         doc.font('Helvetica-Bold').fontSize(14).fillColor("#383392").text(subHeaderText);
         doc.moveDown(0.3);
       }
@@ -1848,11 +1838,18 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
         }
       }
 
-      // Check if line is a main header
-      if (line.match(/^#{1,2}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
-        const headerText = line.replace(/^#{1,2}\s+/, '').trim();
+      // Check if line is a main header.
+      // AI-generated SOWs use ### for top-level sections (e.g. "### **1.0
+      // Solution Overview**") and #### for subsections, so 1–3 hashes map to
+      // Heading 1. Strip any ** bold wrapper from the heading text.
+      if (line.match(/^#{1,3}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
+        const headerText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').trim();
         contentElements.push(
           new Paragraph({
+            // Real Word heading style so the Table of Contents (page 2) and
+            // Word's navigation pane both pick it up. The explicit run props
+            // keep the brand colour/size; the heading drives the outline level.
+            heading: HeadingLevel.HEADING_1,
             children: [
               new TextRun({
                 text: headerText,
@@ -1866,11 +1863,12 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
           })
         );
       }
-      // Check if line is a subheader
-      else if (line.match(/^#{3,4}\s+/) || line.match(/^\*\*.*\*\*$/)) {
-        const subHeaderText = line.replace(/^#{3,4}\s+/, '').replace(/\*\*/g, '').trim();
+      // Check if line is a subheader (#### and deeper, or a fully bold line)
+      else if (line.match(/^#{4,6}\s+/) || line.match(/^\*\*.*\*\*$/)) {
+        const subHeaderText = line.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
         contentElements.push(
           new Paragraph({
+            heading: HeadingLevel.HEADING_2,
             children: [
               new TextRun({
                 text: subHeaderText,
@@ -1935,60 +1933,17 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       i++;
     }
 
+    // Front matter: cover (p1) + index/TOC (p2) + version & approval (p3),
+    // then the parsed body content.
+    const frontMatter = buildDocxFrontMatter(sow);
+
     const doc = new Document({
+      features: { updateFields: true }, // prompt Word to populate the TOC page numbers on open
       sections: [
         {
           properties: {},
           children: [
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "Statement of Work",
-                  bold: true,
-                  font: "Verdana",
-                  size: 48, // 24pt
-                  color: "151744",
-                }),
-              ],
-              alignment: "center",
-              spacing: { after: 400 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "Client Information",
-                  bold: true,
-                  font: "Verdana",
-                  size: 32, // 16pt
-                  color: "707CF1",
-                  underline: {},
-                }),
-              ],
-              spacing: { before: 200, after: 100 },
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({ text: "Account: ", bold: true, font: "Verdana", size: 19 }),
-                new TextRun({ text: sow.account_name, font: "Verdana", size: 19 }),
-              ],
-            }),
-            ...(sow.account_contact
-              ? [
-                  new Paragraph({
-                    children: [
-                      new TextRun({ text: "Contact: ", bold: true, font: "Verdana", size: 19 }),
-                      new TextRun({ text: sow.account_contact, font: "Verdana", size: 19 }),
-                    ],
-                  }),
-                ]
-              : []),
-            new Paragraph({
-              children: [
-                new TextRun({ text: "Date: ", bold: true, font: "Verdana", size: 19 }),
-                new TextRun({ text: new Date(sow.created_at).toLocaleDateString(), font: "Verdana", size: 19 }),
-              ],
-              spacing: { after: 300 },
-            }),
+            ...frontMatter,
             ...contentElements,
           ],
         },
