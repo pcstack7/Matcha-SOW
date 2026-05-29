@@ -326,19 +326,22 @@ app.get("/auth/azure", (req, res, next) => {
 // Azure AD callback — Microsoft redirects back here with auth code (responseMode: 'query')
 app.get("/auth/azure/callback", (req, res, next) => {
   passport.authenticate("azuread-openidconnect", (err, user, info) => {
+    // Resolve the frontend base once so all redirects go to the same origin.
+    // In local dev FRONTEND_URL=http://localhost:5173; in production leave unset.
+    const fe = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
     if (err) {
       console.error("Azure SSO callback error:", JSON.stringify(err, null, 2));
-      return res.redirect(`/?sso_error=${encodeURIComponent(err.message || 'server_error')}`);
+      return res.redirect(`${fe}/?sso_error=${encodeURIComponent(err.message || 'server_error')}`);
     }
     if (!user) {
       const msg = (info && info.message) ? info.message : "Authentication failed";
       console.warn("Azure SSO login rejected — info:", JSON.stringify(info, null, 2));
-      return res.redirect(`/?sso_error=${encodeURIComponent(msg)}`);
+      return res.redirect(`${fe}/?sso_error=${encodeURIComponent(msg)}`);
     }
     req.login(user, (loginErr) => {
       if (loginErr) {
         console.error("Session error after Azure SSO:", loginErr);
-        return res.redirect("/?sso_error=session_error");
+        return res.redirect(`${fe}/?sso_error=session_error`);
       }
       console.log("Azure SSO login successful for user:", user.username, "role:", user.role);
       // Explicitly save the session BEFORE redirecting so the SQLite store has
@@ -354,7 +357,13 @@ app.get("/auth/azure/callback", (req, res, next) => {
         }
         // Add ?sso=1 so the React app can detect a fresh post-SSO page load
         // and retry the auth check once if the first attempt returns 401.
-        return res.redirect("/?sso=1");
+        //
+        // FRONTEND_URL lets local dev work correctly:
+        //   • In production:  not set → relative redirect stays on port 3000
+        //   • In local dev:   set to http://localhost:5173 → redirect lands on
+        //     the Vite dev server (which serves the latest hot-reloaded React
+        //     code) rather than port 3000 (which only has the static build).
+        return res.redirect(`${fe}/?sso=1`);
       });
     });
   })(req, res, next);

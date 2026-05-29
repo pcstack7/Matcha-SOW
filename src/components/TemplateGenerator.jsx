@@ -1147,20 +1147,21 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictM
       borderRadius: 8,
       padding: '1rem',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-        <div>
-          <p style={{
-            fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase',
-            letterSpacing: '0.06em', color: '#6b7280', margin: 0,
-          }}>
-            Additional Replacements (optional)
-          </p>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280', margin: '0.25rem 0 0' }}>
-            Replace any literal text in the template — environment names, hostnames, project codes — that isn't a defined placeholder.
-          </p>
-        </div>
+      {/* Header — title + description full-width, then action buttons on own row */}
+      <div style={{ marginBottom: '0.5rem' }}>
+        <p style={{
+          fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.06em', color: '#6b7280', margin: 0,
+        }}>
+          Additional Replacements (optional)
+        </p>
+        <p style={{ fontSize: '0.75rem', color: '#6b7280', margin: '0.2rem 0 0.5rem' }}>
+          Replace literal text not covered by placeholders — hostnames, project codes, custom phrases.
+        </p>
+
+        {/* Action row — undo + add sit below the description so there is always room */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          {/* Phase 4 — one-step undo for the most recent ad-hoc list change */}
+          {/* Phase 4 — one-step undo */}
           <button
             type="button"
             onClick={onUndo}
@@ -1171,7 +1172,7 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictM
               color: canUndo ? '#374151' : '#9ca3af',
               border: `1px solid ${canUndo ? '#d1d5db' : '#e5e7eb'}`,
               borderRadius: 6,
-              padding: '0.4rem 0.65rem',
+              padding: '0.35rem 0.65rem',
               fontSize: '0.8rem',
               fontWeight: 600,
               cursor: canUndo ? 'pointer' : 'not-allowed',
@@ -1189,7 +1190,7 @@ function AdHocReplacementsPanel({ replacements, onChange, previewText, conflictM
               color: '#fff',
               border: 'none',
               borderRadius: 6,
-              padding: '0.4rem 0.75rem',
+              padding: '0.35rem 0.75rem',
               fontSize: '0.8rem',
               fontWeight: 600,
               cursor: 'pointer',
