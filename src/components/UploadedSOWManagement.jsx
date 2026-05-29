@@ -391,7 +391,7 @@ function UploadedSOWManagement({ userRole }) {
 
       {showModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
+          <div className="modal-content" style={{ maxWidth: '800px' }}>
             <div className="modal-header">
               <h2>{editingSOW ? 'Edit SOW Details' : 'Upload New SOW'}</h2>
               <button className="modal-close" onClick={handleCloseModal}>&times;</button>
@@ -472,7 +472,7 @@ function UploadedSOWManagement({ userRole }) {
                   name="description"
                   value={formData.description}
                   onChange={handleChange}
-                  rows="3"
+                  rows="2"
                   placeholder="What is this SOW about?"
                   disabled={uploading}
                 />
@@ -481,26 +481,11 @@ function UploadedSOWManagement({ userRole }) {
               <div className="form-row">
                 <div className="form-group">
                   <label>Final SOW Pricing</label>
-                  <input
-                    type="number"
-                    name="pricing"
-                    value={formData.pricing}
-                    onChange={handleChange}
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    disabled={uploading}
-                  />
+                  <input type="number" name="pricing" value={formData.pricing} onChange={handleChange} step="0.01" min="0" placeholder="0.00" disabled={uploading} />
                 </div>
-
                 <div className="form-group">
                   <label>Currency</label>
-                  <select
-                    name="currency"
-                    value={formData.currency}
-                    onChange={handleChange}
-                    disabled={uploading}
-                  >
+                  <select name="currency" value={formData.currency} onChange={handleChange} disabled={uploading}>
                     <option value="USD">USD</option>
                     <option value="AUD">AUD</option>
                     <option value="SGD">SGD</option>
@@ -508,128 +493,27 @@ function UploadedSOWManagement({ userRole }) {
                 </div>
               </div>
 
-              <h3 style={{ marginTop: '20px', marginBottom: '10px', fontSize: '14px', color: '#5E63CD' }}>
+              <p className="modal-section-label" style={{ marginTop: '0.75rem' }}>
                 Resource Hours (Optional)
-              </h3>
+              </p>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Project Management</label>
-                  <input
-                    type="number"
-                    name="pm_hours"
-                    value={formData.pm_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Implementation Consultant</label>
-                  <input
-                    type="number"
-                    name="ic_hours"
-                    value={formData.ic_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Solution Architect</label>
-                  <input
-                    type="number"
-                    name="sa_hours"
-                    value={formData.sa_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>System Engineer</label>
-                  <input
-                    type="number"
-                    name="se_hours"
-                    value={formData.se_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Trainer</label>
-                  <input
-                    type="number"
-                    name="trainer_hours"
-                    value={formData.trainer_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Integration Consultant</label>
-                  <input
-                    type="number"
-                    name="integration_hours"
-                    value={formData.integration_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label>APAC Testing Consultant</label>
-                  <input
-                    type="number"
-                    name="apac_testing_hours"
-                    value={formData.apac_testing_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>APAC R&D</label>
-                  <input
-                    type="number"
-                    name="apac_rd_hours"
-                    value={formData.apac_rd_hours}
-                    onChange={handleChange}
-                    step="0.5"
-                    min="0"
-                    placeholder="0"
-                    disabled={uploading}
-                  />
-                </div>
+              {/* 8 hour fields in a 4-column grid — halves the vertical space */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.6rem' }}>
+                {[
+                  { label: 'PM', name: 'pm_hours' },
+                  { label: 'IC', name: 'ic_hours' },
+                  { label: 'SA', name: 'sa_hours' },
+                  { label: 'SE', name: 'se_hours' },
+                  { label: 'Trainer', name: 'trainer_hours' },
+                  { label: 'Integration', name: 'integration_hours' },
+                  { label: 'APAC Test', name: 'apac_testing_hours' },
+                  { label: 'APAC R&D', name: 'apac_rd_hours' },
+                ].map(({ label, name }) => (
+                  <div key={name} className="form-group form-group-sm">
+                    <label>{label}</label>
+                    <input type="number" name={name} value={formData[name]} onChange={handleChange} step="0.5" min="0" placeholder="0" disabled={uploading} />
+                  </div>
+                ))}
               </div>
 
               <div className="modal-footer">
