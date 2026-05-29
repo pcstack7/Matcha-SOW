@@ -287,11 +287,29 @@ app.post("/auth/login", (req, res, next) => {
 
 // Logout
 app.post("/auth/logout", (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ error: "Logout error" });
-    }
+  // Hard deadline: always respond within 4 s even if the session store hangs.
+  // connect-sqlite3's session.save() (called internally by req.logout()) can
+  // block indefinitely under lock contention on EC2, causing a 504 from Caddy.
+  let responded = false;
+  const finish = () => {
+    if (responded) return;
+    responded = true;
+    res.clearCookie("connect.sid");
     res.json({ message: "Logout successful" });
+  };
+  const timer = setTimeout(() => {
+    console.warn("Logout: session store did not respond in time — forcing finish");
+    finish();
+  }, 4000);
+
+  req.logout((logoutErr) => {
+    if (logoutErr) console.error("Passport logout error:", logoutErr);
+    // Destroy the session record in SQLite (more reliable than save()).
+    req.session.destroy((destroyErr) => {
+      if (destroyErr) console.error("Session destroy error:", destroyErr);
+      clearTimeout(timer);
+      finish();
+    });
   });
 });
 
