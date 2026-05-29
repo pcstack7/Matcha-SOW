@@ -11,7 +11,7 @@ import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
-import { buildDocxFrontMatter, renderPdfFrontMatter } from "./services/sow-frontmatter.js";
+import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1611,8 +1611,10 @@ app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
     // Leaves the cursor on a fresh page for the body content below.
     renderPdfFrontMatter(doc, sow);
 
-    // Parse and format content with tables, bullets, and inline markdown
-    const lines = sow.content.split('\n');
+    // Parse and format content with tables, bullets, and inline markdown.
+    // Strip the AI's leading Project/Client/Date/Version block — the cover
+    // now carries that information.
+    const lines = stripLeadingMetaBlock(sow.content).split('\n');
     let i = 0;
 
     // Helper function to render text with inline bold markdown
@@ -1759,9 +1761,11 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       return textRuns.length > 0 ? textRuns : [new TextRun({ text, font: "Verdana", size: 19 })];
     };
 
-    // Parse content and create formatted paragraphs/tables
+    // Parse content and create formatted paragraphs/tables.
+    // Strip the AI's leading Project/Client/Date/Version block — the cover
+    // page now carries that information.
     const contentElements = [];
-    const lines = sow.content.split('\n');
+    const lines = stripLeadingMetaBlock(sow.content).split('\n');
     let i = 0;
 
     while (i < lines.length) {

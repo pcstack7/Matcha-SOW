@@ -29,6 +29,8 @@ import {
   Paragraph, TextRun, ImageRun, PageBreak, AlignmentType, HeadingLevel,
   Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign,
   ShadingType, TableOfContents,
+  HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom,
+  HorizontalPositionAlign, VerticalPositionAlign,
 } from 'docx';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,26 +48,38 @@ const COLORS = {
 
 const DEFAULT_VERSION = '1.0';
 
-// ── Cover image (read once, cached) ───────────────────────────────────────────
-const COVER_IMAGE_PATH = path.join(__dirname, '..', 'assets', 'brand', 'altera-cover.png');
-const COVER_IMAGE_NATURAL = { width: 1658, height: 1388 }; // px — for aspect ratio
+// ── A4 page geometry (the Altera APAC template is A4) ──────────────────────────
+// docx-js defaults to A4; we size the full-bleed cover image to the full sheet.
+const A4 = {
+  widthPx: 794,   // 210 mm @ 96 dpi
+  heightPx: 1123, // 297 mm @ 96 dpi
+};
 
-let _coverBufferCache;
-function getCoverImageBuffer() {
-  if (_coverBufferCache !== undefined) return _coverBufferCache;
+// ── Brand assets (read once, cached) ──────────────────────────────────────────
+const ASSET_DIR = path.join(__dirname, '..', 'assets', 'brand');
+const COVER_BG_PATH = path.join(ASSET_DIR, 'altera-cover-bg.jpg');   // full-page mountain
+const LOGO_WHITE_PATH = path.join(ASSET_DIR, 'altera-logo-white.png'); // white wordmark
+const LOGO_NATURAL = { width: 468, height: 180 }; // px — for aspect ratio
+
+const _bufferCache = {};
+function readAsset(p) {
+  if (p in _bufferCache) return _bufferCache[p];
   try {
-    _coverBufferCache = fs.readFileSync(COVER_IMAGE_PATH);
+    _bufferCache[p] = fs.readFileSync(p);
   } catch {
-    _coverBufferCache = null; // graceful: cover renders without the graphic
+    _bufferCache[p] = null; // graceful: cover still renders without the asset
   }
-  return _coverBufferCache;
+  return _bufferCache[p];
 }
+const getCoverBgBuffer = () => readAsset(COVER_BG_PATH);
+const getLogoWhiteBuffer = () => readAsset(LOGO_WHITE_PATH);
 
 // ── Shared field derivation ───────────────────────────────────────────────────
 function deriveFields(sow) {
   const customer = sow.account_name || 'Customer';
-  const author =
-    sow.created_by_display_name || sow.created_by_username || 'Altera Digital Health';
+  // These SOWs are produced by the AI generator, so the version-control row
+  // attributes authorship to "AI Generated" rather than the logged-in user.
+  const author = 'AI Generated';
   const dateObj = sow.created_at ? new Date(sow.created_at) : new Date();
   const longDate = formatLongDate(dateObj);
 
@@ -104,68 +118,82 @@ export function buildDocxFrontMatter(sow) {
   const children = [];
 
   // ── Page 1 — Cover ────────────────────────────────────────────────────
-  const coverBuf = getCoverImageBuffer();
-  if (coverBuf) {
-    const imgW = 260;
-    const imgH = Math.round(imgW * (COVER_IMAGE_NATURAL.height / COVER_IMAGE_NATURAL.width));
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 1200, after: 600 },
-        children: [
-          new ImageRun({
-            type: 'png',
-            data: coverBuf,
-            transformation: { width: imgW, height: imgH },
-            altText: { title: 'Altera', description: 'Altera brand graphic', name: 'AlteraCover' },
-          }),
-        ],
+  // Full-bleed mountain background (anchored to the page, behind everything),
+  // the white Altera wordmark top-left, then the title block in white text
+  // floating over the open sky area. White text reads cleanly on the dusk image.
+  const bgBuf = getCoverBgBuffer();
+  const logoBuf = getLogoWhiteBuffer();
+
+  const coverAnchors = [];
+  if (bgBuf) {
+    coverAnchors.push(
+      new ImageRun({
+        type: 'jpg',
+        data: bgBuf,
+        transformation: { width: A4.widthPx, height: A4.heightPx },
+        floating: {
+          horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 0 },
+          verticalPosition: { relative: VerticalPositionRelativeFrom.PAGE, offset: 0 },
+          behindDocument: true,
+          allowOverlap: true,
+        },
+        altText: { title: 'Altera', description: 'Altera cover', name: 'AlteraCoverBg' },
       })
     );
-  } else {
-    children.push(new Paragraph({ spacing: { before: 1800 }, text: '' }));
+  }
+  if (logoBuf) {
+    const logoW = 170;
+    const logoH = Math.round(logoW * (LOGO_NATURAL.height / LOGO_NATURAL.width));
+    coverAnchors.push(
+      new ImageRun({
+        type: 'png',
+        data: logoBuf,
+        transformation: { width: logoW, height: logoH },
+        floating: {
+          // ~1 inch in from the top-left corner of the page (914400 EMU = 1in)
+          horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 914400 },
+          verticalPosition: { relative: VerticalPositionRelativeFrom.PAGE, offset: 820000 },
+          behindDocument: false,
+          allowOverlap: true,
+        },
+        altText: { title: 'Altera', description: 'Altera Digital Health', name: 'AlteraLogo' },
+      })
+    );
   }
 
+  // Anchor paragraph carries the floating images; it occupies no visible height.
   children.push(
     new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 200, after: 200 },
-      children: [
-        new TextRun({ text: 'Statement of Work', bold: true, font: 'Verdana', size: 56, color: COLORS.ink }),
-      ],
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: f.subtitle ? 120 : 400 },
-      children: [
-        new TextRun({ text: f.customer, bold: true, font: 'Verdana', size: 32, color: COLORS.purple }),
-      ],
+      children: coverAnchors,
+      spacing: { after: 0 },
     })
   );
 
-  if (f.subtitle) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 400 },
-        children: [
-          new TextRun({ text: f.subtitle, font: 'Verdana', size: 24, color: COLORS.light }),
-        ],
-      })
-    );
-  }
-
-  // Meta lines (client #, date) centred under the title block
-  const metaLine = (label, value) =>
+  // Title block — pushed down into the sky area with leading blank space.
+  const whiteTitle = (text, size, bold, after) =>
     new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 60 },
-      children: [
-        new TextRun({ text: `${label}: `, bold: true, font: 'Verdana', size: 20, color: COLORS.ink }),
-        new TextRun({ text: value, font: 'Verdana', size: 20, color: COLORS.ink }),
-      ],
+      alignment: AlignmentType.LEFT,
+      indent: { left: 360 },
+      spacing: { after },
+      children: [new TextRun({ text, bold, font: 'Verdana', size, color: COLORS.white })],
     });
 
+  // Spacer to drop the title into the upper-middle of the page (below the logo).
+  children.push(new Paragraph({ spacing: { before: 3600 }, children: [] }));
+
+  children.push(whiteTitle('Statement of Work', 56, true, 160));
+  children.push(whiteTitle(f.customer, 34, true, f.subtitle ? 100 : 320));
+  if (f.subtitle) children.push(whiteTitle(f.subtitle, 24, false, 320));
+
+  const metaLine = (label, value) =>
+    new Paragraph({
+      indent: { left: 360 },
+      spacing: { after: 50 },
+      children: [
+        new TextRun({ text: `${label}: `, bold: true, font: 'Verdana', size: 20, color: COLORS.white }),
+        new TextRun({ text: value, font: 'Verdana', size: 20, color: COLORS.white }),
+      ],
+    });
   if (f.clientNumber) children.push(metaLine('Client #', String(f.clientNumber)));
   children.push(metaLine('Date', f.longDate));
   children.push(metaLine('Version', f.version));
@@ -329,42 +357,47 @@ function buildDocxApprovalTable(f) {
 export function renderPdfFrontMatter(doc, sow) {
   const f = deriveFields(sow);
   const pageW = doc.page.width;
+  const pageH = doc.page.height;
   const margin = doc.page.margins.left;
-  const contentW = pageW - margin * 2;
 
   // ── Page 1 — Cover ────────────────────────────────────────────────────
-  const coverBuf = getCoverImageBuffer();
-  if (coverBuf) {
-    const imgW = 230;
-    const imgX = (pageW - imgW) / 2;
-    doc.image(coverBuf, imgX, 110, { width: imgW });
-    doc.y = 110 + imgW * (COVER_IMAGE_NATURAL.height / COVER_IMAGE_NATURAL.width) + 40;
-  } else {
-    doc.y = 200;
+  // Full-bleed mountain background, white logo top-left, white title block
+  // floating over the sky area.
+  const bgBuf = getCoverBgBuffer();
+  const logoBuf = getLogoWhiteBuffer();
+
+  if (bgBuf) {
+    // `cover` scales the image to fill the whole page, cropping any overflow
+    // so the A4-ratio photo isn't distorted on a Letter-sized page.
+    doc.image(bgBuf, 0, 0, { cover: [pageW, pageH], align: 'center', valign: 'center' });
   }
 
-  doc.font('Helvetica-Bold').fontSize(28).fillColor('#151744')
-    .text('Statement of Work', margin, doc.y, { align: 'center', width: contentW });
-  doc.moveDown(0.6);
-  doc.font('Helvetica-Bold').fontSize(16).fillColor('#393392')
-    .text(f.customer, { align: 'center', width: contentW });
+  const inset = 60; // left inset for logo + title block
+  if (logoBuf) {
+    doc.image(logoBuf, inset, 64, { width: 150 });
+    // Thin pink accent rule under the logo (matches the brand cover).
+    doc.save().rect(inset, 64 + 60, 90, 3).fill('#F56E7B').restore();
+  }
 
+  // Title block in the upper-middle of the page (white on the dusk sky).
+  const titleW = pageW - inset * 2;
+  let ty = pageH * 0.32;
+  doc.fillColor('#FFFFFF');
+  doc.font('Helvetica-Bold').fontSize(30).text('Statement of Work', inset, ty, { width: titleW });
+  ty = doc.y + 8;
+  doc.font('Helvetica-Bold').fontSize(18).text(f.customer, inset, ty, { width: titleW });
   if (f.subtitle) {
-    doc.moveDown(0.3);
-    doc.font('Helvetica').fontSize(12).fillColor('#707CF1')
-      .text(f.subtitle, { align: 'center', width: contentW });
+    ty = doc.y + 4;
+    doc.font('Helvetica').fontSize(12).fillColor('#E5E7FF').text(f.subtitle, inset, ty, { width: titleW });
   }
 
-  doc.moveDown(1.5);
-  // NB: pdfkit's `continued: true` mis-positions segments under center
-  // alignment (each fragment is centred independently and they overlap), so
-  // render each meta line as a single centred string.
-  doc.font('Helvetica').fontSize(10).fillColor('#151744');
-  const metaCenter = (label, value) =>
-    doc.text(`${label}: ${value}`, { align: 'center', width: contentW, lineGap: 2 });
-  if (f.clientNumber) metaCenter('Client #', String(f.clientNumber));
-  metaCenter('Date', f.longDate);
-  metaCenter('Version', f.version);
+  doc.moveDown(1.2);
+  doc.font('Helvetica').fontSize(10).fillColor('#FFFFFF');
+  const metaLine = (label, value) =>
+    doc.text(`${label}: ${value}`, inset, doc.y, { width: titleW, lineGap: 2 });
+  if (f.clientNumber) metaLine('Client #', String(f.clientNumber));
+  metaLine('Date', f.longDate);
+  metaLine('Version', f.version);
 
   // ── Page 2 — Index / Contents ─────────────────────────────────────────
   doc.addPage();
@@ -474,4 +507,55 @@ function extractTopLevelHeadings(content) {
   return titles.filter(
     (t, i) => t && t !== titles[i - 1] && t.toLowerCase() !== 'statement of work'
   );
+}
+
+/**
+ * Strip the leading metadata block that AI-generated SOWs tend to open with,
+ * now that the cover page carries the same information:
+ *
+ *   ### **Statement of Work**
+ *   **Project:** ...
+ *   **Client:**  ...
+ *   **Date:**    ...
+ *   **Version:** 1.0
+ *   ---
+ *
+ * Conservative: only strips when a recognisable "Label:" meta block is found
+ * at the very top. Otherwise returns the content untouched.
+ */
+export function stripLeadingMetaBlock(content) {
+  if (!content) return content;
+  const lines = content.split('\n');
+  let i = 0;
+
+  const skipBlanks = () => { while (i < lines.length && lines[i].trim() === '') i++; };
+
+  skipBlanks();
+
+  // Optional leading "Statement of Work" heading (any heading level / bold).
+  if (i < lines.length) {
+    const t = lines[i].replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').trim().toLowerCase();
+    if (t === 'statement of work') i++;
+  }
+  skipBlanks();
+
+  // Consume contiguous "Label:" metadata lines.
+  const metaRe = /^\*{0,2}\s*(project|client|customer|account|date|version|prepared\s+by|prepared\s+for|author)\s*:/i;
+  let metaCount = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (line === '') { i++; continue; }
+    if (metaRe.test(line)) { i++; metaCount++; continue; }
+    break;
+  }
+
+  if (metaCount === 0) return content; // no meta block detected — leave as-is
+
+  // Drop a trailing horizontal rule and any surrounding blank lines.
+  while (
+    i < lines.length &&
+    (lines[i].trim() === '' || /^-{3,}$/.test(lines[i].trim()) || /^\*{3,}$/.test(lines[i].trim()))
+  ) i++;
+
+  return lines.slice(i).join('\n');
 }
