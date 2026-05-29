@@ -166,53 +166,42 @@ function SOWList() {
 
       {selectedSOW && (
         <div className="modal-overlay" onClick={() => setSelectedSOW(null)}>
-          <div className="modal" style={{ maxWidth: '900px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+          {/* Flex-column layout: header + meta are fixed height, only the SOW
+              content area scrolls — the modal itself never gets a scrollbar */}
+          <div className="modal" onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'hidden',
+                     display: 'flex', flexDirection: 'column', padding: 0 }}>
+
+            {/* Sticky header */}
+            <div className="modal-header" style={{ flexShrink: 0, padding: '1.25rem 1.5rem 1rem', borderBottom: '2px solid var(--gray-light)', marginBottom: 0 }}>
               <div>
                 <h3>Statement of Work</h3>
                 <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.25rem' }}>
                   {selectedSOW.account_name} - {formatDate(selectedSOW.created_at)}
                 </p>
               </div>
-              <button className="modal-close" onClick={() => setSelectedSOW(null)}>
-                ×
-              </button>
+              <button className="modal-close" onClick={() => setSelectedSOW(null)}>×</button>
             </div>
 
-            <div style={{ marginBottom: '1rem' }}>
+            {/* Meta strip — fixed, does not scroll */}
+            <div style={{ flexShrink: 0, padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--gray-light)', fontSize: '0.875rem', lineHeight: 1.6 }}>
               <strong>Account:</strong> {selectedSOW.account_name}
               {selectedSOW.account_contact && <> (Contact: {selectedSOW.account_contact})</>}
-              <br />
-              {selectedSOW.template_name && (
-                <>
-                  <strong>Template:</strong> {selectedSOW.template_name}
-                  <br />
-                </>
-              )}
-              {selectedSOW.product_name && (
-                <>
-                  <strong>Product:</strong> {selectedSOW.product_name}
-                  <br />
-                </>
-              )}
-              {selectedSOW.engagement_type_name && (
-                <>
-                  <strong>Engagement Type:</strong> {selectedSOW.engagement_type_name}
-                  <br />
-                </>
-              )}
-              {(selectedSOW.created_by_display_name || selectedSOW.created_by_username) && (
-                <>
-                  <strong>Created By:</strong> {selectedSOW.created_by_display_name || selectedSOW.created_by_username}
-                  <br />
-                </>
-              )}
-              <strong>Created:</strong> {formatDate(selectedSOW.created_at)}
+              {selectedSOW.template_name && <> &nbsp;·&nbsp; <strong>Template:</strong> {selectedSOW.template_name}</>}
+              {selectedSOW.product_name && <> &nbsp;·&nbsp; <strong>Product:</strong> {selectedSOW.product_name}</>}
+              {selectedSOW.engagement_type_name && <> &nbsp;·&nbsp; <strong>Engagement:</strong> {selectedSOW.engagement_type_name}</>}
+              {(selectedSOW.created_by_display_name || selectedSOW.created_by_username) && <> &nbsp;·&nbsp; <strong>By:</strong> {selectedSOW.created_by_display_name || selectedSOW.created_by_username}</>}
+              &nbsp;·&nbsp; <strong>Created:</strong> {formatDate(selectedSOW.created_at)}
             </div>
 
-            <div className="sow-preview">{formatContent(selectedSOW.content)}</div>
+            {/* Scrollable SOW content — only this area scrolls */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              <div className="sow-preview" style={{ maxHeight: 'none', borderRadius: 0 }}>
+                {formatContent(selectedSOW.content)}
+              </div>
+            </div>
 
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ flexShrink: 0, padding: '1rem 1.5rem', borderTop: '1px solid var(--gray-light)', marginTop: 0 }}>
               <button
                 className="btn btn-secondary"
                 onClick={() => handleExport(selectedSOW.id, 'pdf')}
