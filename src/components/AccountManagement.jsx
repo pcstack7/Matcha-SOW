@@ -271,137 +271,92 @@ function AccountManagement({ userRole }) {
 
       {showModal && isAdmin && (
         <div className="modal-overlay" onClick={handleCloseModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-            <div className="modal-header">
+          {/* Wider modal, reduced padding — keeps all fields visible without scrolling */}
+          <div className="modal" onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 660, padding: '1.25rem 1.5rem', maxHeight: 'none', overflow: 'visible' }}>
+            <div className="modal-header" style={{ marginBottom: '1rem', paddingBottom: '0.75rem' }}>
               <h3>{editingAccount ? 'Edit Account' : 'Add Account'}</h3>
               <button className="modal-close" onClick={handleCloseModal}>×</button>
             </div>
 
             <form onSubmit={handleSubmit}>
               {/* ── Contact Information ─────────────────────────── */}
-              <div style={{ marginBottom: '0.5rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary, #6b7280)', marginBottom: '0.75rem' }}>
-                  Contact Information
-                </p>
+              <p className="modal-section-label">Contact Information</p>
 
-                <div className="form-group">
-                  <label>Account Name <span style={{ color: 'var(--danger, #ef4444)' }}>*</span></label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formData.name}
-                    onChange={handleChange('name')}
-                    placeholder="e.g. St Luke's Medical Center Global City Inc"
-                    required
-                  />
+              {/* Row 1: Account Name (full width) */}
+              <div className="form-group form-group-sm">
+                <label>Account Name <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={formData.name}
+                  onChange={handleChange('name')}
+                  placeholder="e.g. St Luke's Medical Center Global City Inc"
+                  required
+                />
+              </div>
+
+              {/* Row 2: Contact + Phone + Email — three columns */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
+                <div className="form-group form-group-sm">
+                  <label>Account Contact</label>
+                  <input type="text" className="form-control" value={formData.account_contact}
+                    onChange={handleChange('account_contact')} placeholder="Contact name" />
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div className="form-group">
-                    <label>Account Contact</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.account_contact}
-                      onChange={handleChange('account_contact')}
-                      placeholder="Primary contact name"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Phone</label>
-                    <input
-                      type="tel"
-                      className="form-control"
-                      value={formData.phone}
-                      onChange={handleChange('phone')}
-                      placeholder="+1 555 000 0000"
-                    />
-                  </div>
+                <div className="form-group form-group-sm">
+                  <label>Phone</label>
+                  <input type="tel" className="form-control" value={formData.phone}
+                    onChange={handleChange('phone')} placeholder="+1 555 000 0000" />
                 </div>
-
-                <div className="form-group">
+                <div className="form-group form-group-sm">
                   <label>Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={formData.email}
-                    onChange={handleChange('email')}
-                    placeholder="contact@client.com"
-                  />
+                  <input type="email" className="form-control" value={formData.email}
+                    onChange={handleChange('email')} placeholder="contact@client.com" />
                 </div>
+              </div>
 
-                <div className="form-group">
-                  <label>Notes</label>
-                  <textarea
-                    className="form-control"
-                    value={formData.notes}
-                    onChange={handleChange('notes')}
-                    rows="2"
-                    placeholder="Any additional notes about this account"
-                  />
-                </div>
+              {/* Row 3: Notes (single row, resizable) */}
+              <div className="form-group form-group-sm">
+                <label>Notes</label>
+                <textarea className="form-control" value={formData.notes}
+                  onChange={handleChange('notes')} rows="1"
+                  placeholder="Any additional notes about this account" />
               </div>
 
               {/* ── SOW Template Fields ──────────────────────────── */}
-              <div style={{ borderTop: '1px solid var(--border, #e5e7eb)', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary, #6b7280)', marginBottom: '0.25rem' }}>
-                  SOW Template Fields
-                </p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary, #6b7280)', marginBottom: '0.75rem' }}>
-                  Used to auto-fill placeholders when generating Fixed SOW templates.
-                </p>
+              <p className="modal-section-label" style={{ marginTop: '0.75rem', borderTop: '1px solid #e5e7eb', paddingTop: '0.75rem' }}>
+                SOW Template Fields
+              </p>
+              <p style={{ fontSize: '0.73rem', color: '#6b7280', margin: '-0.35rem 0 0.5rem' }}>
+                Auto-fills placeholders when generating Fixed SOW templates.
+              </p>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div className="form-group">
-                    <label>Short Name / Acronym</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.short_name}
-                      onChange={handleChange('short_name')}
-                      placeholder="e.g. SLMC, SAH, AWH"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Client Number</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.client_number}
-                      onChange={handleChange('client_number')}
-                      placeholder="e.g. 10311837"
-                    />
-                  </div>
+              {/* Row 4: Short Name + Client Number + Country + Sites — four columns */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.6rem' }}>
+                <div className="form-group form-group-sm">
+                  <label>Short Name</label>
+                  <input type="text" className="form-control" value={formData.short_name}
+                    onChange={handleChange('short_name')} placeholder="e.g. SLMC" />
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div className="form-group">
-                    <label>Country</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.country}
-                      onChange={handleChange('country')}
-                      placeholder="e.g. Philippines, Australia"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Sites / Facilities</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formData.sites}
-                      onChange={handleChange('sites')}
-                      placeholder="e.g. Quezon City and Global City"
-                    />
-                  </div>
+                <div className="form-group form-group-sm">
+                  <label>Client Number</label>
+                  <input type="text" className="form-control" value={formData.client_number}
+                    onChange={handleChange('client_number')} placeholder="e.g. 10311837" />
+                </div>
+                <div className="form-group form-group-sm">
+                  <label>Country</label>
+                  <input type="text" className="form-control" value={formData.country}
+                    onChange={handleChange('country')} placeholder="e.g. Australia" />
+                </div>
+                <div className="form-group form-group-sm">
+                  <label>Sites</label>
+                  <input type="text" className="form-control" value={formData.sites}
+                    onChange={handleChange('sites')} placeholder="e.g. Global City" />
                 </div>
               </div>
 
-              <div className="modal-footer">
-                <button type="button" className="btn btn-outline" onClick={handleCloseModal}>
-                  Cancel
-                </button>
+              <div className="modal-footer" style={{ marginTop: '1rem', paddingTop: '0.75rem' }}>
+                <button type="button" className="btn btn-outline" onClick={handleCloseModal}>Cancel</button>
                 <button type="submit" className="btn btn-primary">
                   {editingAccount ? 'Update' : 'Create'} Account
                 </button>

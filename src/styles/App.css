@@ -56,6 +56,12 @@ body {
 .sidebar.collapsed {
   width: 64px;
   min-width: 64px;
+  /* Must be visible so ::after tooltip chips can escape the sidebar boundary */
+  overflow: visible;
+}
+
+.sidebar.collapsed .sidebar-nav {
+  overflow: visible; /* unblock both axes so tooltips render outside the nav */
 }
 
 /* ── Brand (logo + title + inline collapse toggle) ── */
@@ -341,11 +347,12 @@ body {
   z-index: 999;
 }
 
-/* Collapsed — center the icons */
+/* Collapsed — center the icons and unblock overflow so tooltip chips show */
 .sidebar.collapsed .nav-item {
   justify-content: center;
   padding: 0.65rem 0;
   margin: 0.1rem 0.35rem;
+  overflow: visible;
 }
 
 /* ── Main content shifts with sidebar ── */
@@ -719,6 +726,25 @@ select.form-control {
   display: flex;
   gap: 1rem;
   justify-content: flex-end;
+}
+
+/* Compact section label inside modals */
+.modal-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6b7280;
+  margin: 0 0 0.5rem;
+}
+
+/* Tighter form-group spacing for compact modals */
+.form-group-sm {
+  margin-bottom: 0.55rem;
+}
+.form-group-sm label {
+  margin-bottom: 0.2rem;
+  font-size: 0.8rem;
 }
 
 /* File Upload */
@@ -1795,6 +1821,16 @@ select.form-control {
   user-select: text;
   -webkit-user-select: text;
   pointer-events: auto;
+}
+
+/* Prevent classification/watermark words (e.g. "OFFICIAL") from being
+   split mid-word inside narrow text frames in the preview header.  The word
+   is one token so word-break:normal keeps it on a single line. */
+.docx-preview-host header span,
+.docx-preview-host header p {
+  word-break: normal;
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 /* ── Mobile / narrow viewports — stack panes vertically ───────────── */

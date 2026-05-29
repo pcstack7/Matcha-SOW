@@ -96,8 +96,12 @@ function cleanTableXml(tableXml) {
     return { xml: tableXml, cleared: false };
   }
 
-  // Rebuild the table: header row untouched, every other row's <w:t> text
-  // content blanked out (cell/run structure preserved so styling survives).
+  // Rebuild the table: header row untouched, every other row is fully cleared:
+  //   • <w:t> text nodes blanked (removes all plain text)
+  //   • <w:drawing>...</w:drawing> blocks removed (removes inline images,
+  //     e.g. signature scans in Approval table cells)
+  //   • <mc:AlternateContent>...</mc:AlternateContent> removed (Word's
+  //     compatibility wrapper that also carries drawing/image content)
   let result = '';
   let cursor = 0;
   for (let i = 0; i < rows.length; i++) {
@@ -105,10 +109,16 @@ function cleanTableXml(tableXml) {
     if (i === 0) {
       result += rows[i].xml;
     } else {
-      const cleared = rows[i].xml.replace(
-        /<w:t([^>]*)>[^<]*<\/w:t>/g,
-        '<w:t$1></w:t>'
-      );
+      let cleared = rows[i].xml
+        // Blank out text runs
+        .replace(/<w:t([^>]*)>[^<]*<\/w:t>/g, '<w:t$1></w:t>')
+        // Remove inline drawings (signature images, diagrams)
+        .replace(/<w:drawing\b[^>]*>[\s\S]*?<\/w:drawing>/g, '')
+        // Remove AlternateContent wrappers (also carry image data in newer Word)
+        .replace(/<mc:AlternateContent\b[^>]*>[\s\S]*?<\/mc:AlternateContent>/g, '')
+        // Remove legacy VML images (older Word format)
+        .replace(/<v:shape\b[^>]*>[\s\S]*?<\/v:shape>/g, '')
+        .replace(/<w:pict\b[^>]*>[\s\S]*?<\/w:pict>/g, '');
       result += cleared;
     }
     cursor = rows[i].end;
