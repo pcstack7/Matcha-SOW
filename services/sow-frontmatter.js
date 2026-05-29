@@ -529,33 +529,40 @@ export function stripLeadingMetaBlock(content) {
   let i = 0;
 
   const skipBlanks = () => { while (i < lines.length && lines[i].trim() === '') i++; };
+  // A line is "separator junk" if it is blank, a lone pipe (markdown table
+  // artifact), or a horizontal rule (--- / ***).
+  const isSeparator = (line) =>
+    line === '' || line === '|' || /^-{3,}$/.test(line) || /^\*{3,}$/.test(line);
 
   skipBlanks();
 
-  // Optional leading "Statement of Work" heading (any heading level / bold).
+  // Optional leading SOW heading — matches:
+  //   "### **Statement of Work**"
+  //   "## Statement of Work: Sunrise EMR Automated Referral Linking"
+  //   "Statement of Work"
+  // The key test: the cleaned text STARTS WITH "statement of work".
   if (i < lines.length) {
     const t = lines[i].replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').trim().toLowerCase();
-    if (t === 'statement of work') i++;
+    if (t.startsWith('statement of work')) i++;
   }
   skipBlanks();
 
-  // Consume contiguous "Label:" metadata lines.
-  const metaRe = /^\*{0,2}\s*(project|client|customer|account|date|version|prepared\s+by|prepared\s+for|author)\s*:/i;
+  // Consume contiguous "Label: value" metadata lines.
+  // Covers both "**Client:** SA Health" and "Client: SA Health" forms.
+  // "SOW Version:" is added alongside plain "Version:".
+  const metaRe = /^\*{0,2}\s*(project|client|customer|account|date|sow\s+version|version|prepared\s+by|prepared\s+for|author)\s*:/i;
   let metaCount = 0;
   while (i < lines.length) {
     const line = lines[i].trim();
-    if (line === '') { i++; continue; }
+    if (line === '' || line === '|') { i++; continue; } // skip blanks / pipe artifacts
     if (metaRe.test(line)) { i++; metaCount++; continue; }
     break;
   }
 
-  if (metaCount === 0) return content; // no meta block detected — leave as-is
+  if (metaCount === 0) return content; // no meta block found — leave as-is
 
-  // Drop a trailing horizontal rule and any surrounding blank lines.
-  while (
-    i < lines.length &&
-    (lines[i].trim() === '' || /^-{3,}$/.test(lines[i].trim()) || /^\*{3,}$/.test(lines[i].trim()))
-  ) i++;
+  // Drop any trailing separator lines (---, ***, lone |, blanks).
+  while (i < lines.length && isSeparator(lines[i].trim())) i++;
 
   return lines.slice(i).join('\n');
 }
