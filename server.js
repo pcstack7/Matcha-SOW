@@ -13,6 +13,7 @@ import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
+import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1605,15 +1606,32 @@ function renderPDFTable(doc, table) {
 }
 
 // Export SOW to PDF
-app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
+app.get("/api/export/:id/pdf", isAuthenticated, async (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {
       return res.status(404).json({ error: "SOW not found" });
     }
 
-    const doc = new PDFDocument({ margin: 50 });
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.pdf`;
+
+    // Preferred path: render the exact same DOCX (Altera APAC template shell)
+    // to PDF via headless LibreOffice so the PDF matches the Word output.
+    // Falls back to the legacy pdfkit renderer if LibreOffice is unavailable.
+    if (isLibreOfficeAvailable()) {
+      try {
+        const docxBuffer = generateAiSowDocx(buildAiSowOptsFromSow(sow));
+        const pdfBuffer = await convertDocxToPdf(docxBuffer);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        return res.send(pdfBuffer);
+      } catch (convErr) {
+        console.error("LibreOffice PDF conversion failed, falling back to pdfkit:", convErr.message);
+        // fall through to pdfkit
+      }
+    }
+
+    const doc = new PDFDocument({ margin: 50 });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

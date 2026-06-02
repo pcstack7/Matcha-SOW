@@ -88,6 +88,20 @@ function parseTableBlock(lines, start) {
   return { headers, rows, endIndex: i };
 }
 
+// A "Table N" caption paragraph (Caption style + SEQ field) so the injected
+// tables are picked up by the List of Tables field. Word renumbers the SEQ
+// fields on field-refresh; we seed the cached number for pre-refresh renders.
+let _tableSeq = 0;
+function tableCaption() {
+  _tableSeq += 1;
+  return (
+    `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>` +
+    `<w:r><w:t xml:space="preserve">Table </w:t></w:r>` +
+    `<w:fldSimple w:instr=" SEQ Table \\* ARABIC "><w:r><w:t>${_tableSeq}</w:t></w:r></w:fldSimple>` +
+    `</w:p>`
+  );
+}
+
 function tableXml(tbl) {
   const cols = tbl.headers.length || 1;
   const cellW = Math.floor(9360 / cols);
@@ -125,6 +139,7 @@ function tableXml(tbl) {
  *   everything else → BodyText
  */
 export function markdownToOoxml(markdown) {
+  _tableSeq = 0; // restart table caption numbering for each document
   // Drop the AI's leading "Statement of Work / Project / Client / Date /
   // Version / ---" block — the cover already carries that information.
   const lines = stripLeadingMetaBlock(String(markdown || '')).split('\n');
@@ -136,10 +151,10 @@ export function markdownToOoxml(markdown) {
 
     if (trimmed === '') { i++; continue; }
 
-    // Table
+    // Table — prefixed with a "Table N" caption for the List of Tables
     if (trimmed.startsWith('|')) {
       const tbl = parseTableBlock(lines, i);
-      if (tbl) { out.push(tableXml(tbl)); i = tbl.endIndex; continue; }
+      if (tbl) { out.push(tableCaption() + tableXml(tbl)); i = tbl.endIndex; continue; }
     }
 
     // Headings — 1-3 hashes (or ALL CAPS) = Heading1; 4-6 hashes = Heading2
@@ -232,6 +247,60 @@ function injectBody(documentXml, bodyOoxml) {
   return `${keepHead}${bodyOoxml}${keepTail}`;
 }
 
+// ── Version History table: fill the first data row ─────────────────────────────
+// Operates only on the first table (Document Control → Version History):
+//   Date | Version | Author | Scope
+// Replaces the placeholder Date/Version text and fills the empty Author/Scope
+// cells of the first data row.
+function fillVersionHistory(documentXml, { date, version, author, scope }) {
+  const m = documentXml.match(/<w:tbl\b[\s\S]*?<\/w:tbl>/);
+  if (!m) return documentXml;
+  let tbl = m[0];
+
+  tbl = tbl.replace(/<w:t([^>]*)>dd-mm-yy<\/w:t>/, `<w:t$1>${esc(date)}</w:t>`);
+  tbl = tbl.replace(/<w:t([^>]*)>v0\.x\/X\.0<\/w:t>/, `<w:t$1>${esc(version)}</w:t>`);
+
+  // First two empty-cell paragraphs in the table are row-1 Author & Scope.
+  let filled = 0;
+  tbl = tbl.replace(/<\/w:pPr><\/w:p>/g, (full) => {
+    filled += 1;
+    if (filled === 1) return `</w:pPr><w:r><w:t xml:space="preserve">${esc(author)}</w:t></w:r></w:p>`;
+    if (filled === 2) return `</w:pPr><w:r><w:t xml:space="preserve">${esc(scope)}</w:t></w:r></w:p>`;
+    return full;
+  });
+
+  return documentXml.slice(0, m.index) + tbl + documentXml.slice(m.index + m[0].length);
+}
+
+// ── List of Tables + List of Figures ───────────────────────────────────────────
+// Inserts two TOC fields (\c "Table" and \c "Figure") right after the Contents
+// section — i.e. immediately before the section-2 break paragraph (rId21).
+function insertListsOfTablesFigures(documentXml) {
+  const sect2 = documentXml.match(/<w:sectPr\b[^>]*>(?:(?!<\/w:sectPr>)[\s\S])*?rId21[\s\S]*?<\/w:sectPr>/);
+  if (!sect2) return documentXml;
+  // The break sits inside the pPr of the last section-2 paragraph; find that
+  // paragraph's opening tag and insert our blocks before it.
+  const paraOpen = documentXml.lastIndexOf('<w:p ', sect2.index);
+  const paraOpenAlt = documentXml.lastIndexOf('<w:p>', sect2.index);
+  const insertAt = Math.max(paraOpen, paraOpenAlt);
+  if (insertAt < 0) return documentXml;
+
+  const tocField = (label, code) =>
+    `<w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t xml:space="preserve">${label}</w:t></w:r></w:p>` +
+    `<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>` +
+    `<w:r><w:fldChar w:fldCharType="begin"/></w:r>` +
+    `<w:r><w:instrText xml:space="preserve"> ${code} </w:instrText></w:r>` +
+    `<w:r><w:fldChar w:fldCharType="separate"/></w:r>` +
+    `<w:r><w:t xml:space="preserve">Right-click and choose “Update Field”.</w:t></w:r>` +
+    `<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`;
+
+  const blocks =
+    tocField('List of Tables', 'TOC \\h \\z \\c "Table"') +
+    tocField('List of Figures', 'TOC \\h \\z \\c "Figure"');
+
+  return documentXml.slice(0, insertAt) + blocks + documentXml.slice(insertAt);
+}
+
 // ── Settings: force field refresh on open ──────────────────────────────────────
 function setUpdateFields(settingsXml) {
   if (/<w:updateFields\b/.test(settingsXml)) {
@@ -289,6 +358,16 @@ export function generateAiSowDocx(opts) {
   doc = replaceBoundControlText(doc, 'ns0:Company', clientName);
   doc = replaceBoundControlText(doc, 'contentStatus', statusLine);
   doc = replaceBoundControlText(doc, 'ns0:description', `[${classification}]`);
+  // Document Control → Version History initial row
+  doc = fillVersionHistory(doc, {
+    date,
+    version: `v${version}`,
+    author: 'AI Generated',
+    scope: 'Initial version',
+  });
+  // List of Tables + List of Figures after the Contents TOC
+  doc = insertListsOfTablesFigures(doc);
+  // Inject the AI body in place of the example content
   doc = injectBody(doc, markdownToOoxml(markdown));
   zip.file('word/document.xml', doc);
 
