@@ -1823,6 +1823,16 @@ select.form-control {
   pointer-events: auto;
 }
 
+/* Cover pages whose text is white (the dark-background cover image isn't
+   rendered by docx-preview) get an Altera-navy backdrop so the white text is
+   legible in the live preview. Applied only to detected white-text pages. */
+.docx-preview-host section.preview-dark-cover {
+  background: linear-gradient(160deg, #151744 0%, #1f2566 55%, #2b2f7a 100%) !important;
+}
+.docx-preview-host section.preview-dark-cover * {
+  background-color: transparent !important;
+}
+
 /* Prevent classification/watermark words (e.g. "OFFICIAL") from being
    split mid-word inside narrow text frames in the preview header.  The word
    is one token so word-break:normal keeps it on a single line. */
