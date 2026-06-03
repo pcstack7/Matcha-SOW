@@ -71,6 +71,15 @@ function inlineRuns(text, { runStyle = 'BodyVerdana' } = {}) {
 const para = (style, innerRuns) =>
   `<w:p><w:pPr><w:pStyle w:val="${style}"/></w:pPr>${innerRuns}</w:p>`;
 
+// Heading paragraph that SUPPRESSES the template's built-in heading auto-
+// numbering (Heading1/2/3 carry numId=35). AI SOW content already includes
+// its own section numbers ("1.0", "2.1", …), so we keep those literal numbers
+// and turn off the style numbering (numId=0) to avoid double numbering like
+// "1.1.0 Solution Overview".
+const headingPara = (style, text) =>
+  `<w:p><w:pPr><w:pStyle w:val="${style}"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr>` +
+  `<w:r><w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p>`;
+
 // ── Markdown table parsing (reused shape from the existing exporters) ──────────
 function parseTableBlock(lines, start) {
   const headerLine = lines[start];
@@ -86,20 +95,6 @@ function parseTableBlock(lines, start) {
     rows.push(cells(lines[i]));
   }
   return { headers, rows, endIndex: i };
-}
-
-// A "Table N" caption paragraph (Caption style + SEQ field) so the injected
-// tables are picked up by the List of Tables field. Word renumbers the SEQ
-// fields on field-refresh; we seed the cached number for pre-refresh renders.
-let _tableSeq = 0;
-function tableCaption() {
-  _tableSeq += 1;
-  return (
-    `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>` +
-    `<w:r><w:t xml:space="preserve">Table </w:t></w:r>` +
-    `<w:fldSimple w:instr=" SEQ Table \\* ARABIC "><w:r><w:t>${_tableSeq}</w:t></w:r></w:fldSimple>` +
-    `</w:p>`
-  );
 }
 
 function tableXml(tbl) {
@@ -139,7 +134,6 @@ function tableXml(tbl) {
  *   everything else → BodyText
  */
 export function markdownToOoxml(markdown) {
-  _tableSeq = 0; // restart table caption numbering for each document
   // Drop the AI's leading "Statement of Work / Project / Client / Date /
   // Version / ---" block — the cover already carries that information.
   const lines = stripLeadingMetaBlock(String(markdown || '')).split('\n');
@@ -151,21 +145,23 @@ export function markdownToOoxml(markdown) {
 
     if (trimmed === '') { i++; continue; }
 
-    // Table — prefixed with a "Table N" caption for the List of Tables
+    // Table
     if (trimmed.startsWith('|')) {
       const tbl = parseTableBlock(lines, i);
-      if (tbl) { out.push(tableCaption() + tableXml(tbl)); i = tbl.endIndex; continue; }
+      if (tbl) { out.push(tableXml(tbl)); i = tbl.endIndex; continue; }
     }
 
-    // Headings — 1-3 hashes (or ALL CAPS) = Heading1; 4-6 hashes = Heading2
+    // Headings — 1-3 hashes (or ALL CAPS) = Heading1; 4-6 hashes = Heading2.
+    // Auto-numbering is suppressed (headingPara) so the AI's own section
+    // numbers are the only ones shown.
     if (/^#{1,3}\s+/.test(line) || /^[A-Z][A-Z\s]{2,}:?\s*$/.test(trimmed)) {
       const t = trimmed.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').replace(/:$/, '').trim();
-      out.push(para('Heading1', `<w:r><w:t xml:space="preserve">${esc(t)}</w:t></w:r>`));
+      out.push(headingPara('Heading1', t));
       i++; continue;
     }
     if (/^#{4,6}\s+/.test(line) || /^\*\*.*\*\*$/.test(trimmed)) {
       const t = trimmed.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
-      out.push(para('Heading2', `<w:r><w:t xml:space="preserve">${esc(t)}</w:t></w:r>`));
+      out.push(headingPara('Heading2', t));
       i++; continue;
     }
 
@@ -272,35 +268,6 @@ function fillVersionHistory(documentXml, { date, version, author, scope }) {
   return documentXml.slice(0, m.index) + tbl + documentXml.slice(m.index + m[0].length);
 }
 
-// ── List of Tables + List of Figures ───────────────────────────────────────────
-// Inserts two TOC fields (\c "Table" and \c "Figure") right after the Contents
-// section — i.e. immediately before the section-2 break paragraph (rId21).
-function insertListsOfTablesFigures(documentXml) {
-  const sect2 = documentXml.match(/<w:sectPr\b[^>]*>(?:(?!<\/w:sectPr>)[\s\S])*?rId21[\s\S]*?<\/w:sectPr>/);
-  if (!sect2) return documentXml;
-  // The break sits inside the pPr of the last section-2 paragraph; find that
-  // paragraph's opening tag and insert our blocks before it.
-  const paraOpen = documentXml.lastIndexOf('<w:p ', sect2.index);
-  const paraOpenAlt = documentXml.lastIndexOf('<w:p>', sect2.index);
-  const insertAt = Math.max(paraOpen, paraOpenAlt);
-  if (insertAt < 0) return documentXml;
-
-  const tocField = (label, code) =>
-    `<w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t xml:space="preserve">${label}</w:t></w:r></w:p>` +
-    `<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>` +
-    `<w:r><w:fldChar w:fldCharType="begin"/></w:r>` +
-    `<w:r><w:instrText xml:space="preserve"> ${code} </w:instrText></w:r>` +
-    `<w:r><w:fldChar w:fldCharType="separate"/></w:r>` +
-    `<w:r><w:t xml:space="preserve">Right-click and choose “Update Field”.</w:t></w:r>` +
-    `<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`;
-
-  const blocks =
-    tocField('List of Tables', 'TOC \\h \\z \\c "Table"') +
-    tocField('List of Figures', 'TOC \\h \\z \\c "Figure"');
-
-  return documentXml.slice(0, insertAt) + blocks + documentXml.slice(insertAt);
-}
-
 // ── Settings: force field refresh on open ──────────────────────────────────────
 function setUpdateFields(settingsXml) {
   if (/<w:updateFields\b/.test(settingsXml)) {
@@ -365,8 +332,6 @@ export function generateAiSowDocx(opts) {
     author: 'AI Generated',
     scope: 'Initial version',
   });
-  // List of Tables + List of Figures after the Contents TOC
-  doc = insertListsOfTablesFigures(doc);
   // Inject the AI body in place of the example content
   doc = injectBody(doc, markdownToOoxml(markdown));
   zip.file('word/document.xml', doc);
