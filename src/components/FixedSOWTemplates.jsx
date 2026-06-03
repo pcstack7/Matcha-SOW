@@ -41,7 +41,29 @@ function FixedSOWTemplates({ userRole }) {
         const d = await r.json();
         throw new Error(d.error || 'Failed to delete');
       }
+      const data = await r.json().catch(() => ({}));
       loadTemplates();
+
+      // Offer to clean up placeholders that are now unused (and not built-in
+      // defaults) as a result of removing this template.
+      const orphans = data.orphanedPlaceholders || [];
+      if (orphans.length > 0) {
+        const list = orphans.map((o) => `• ${o.label} (${o.key})`).join('\n');
+        const remove = window.confirm(
+          `These placeholders are no longer used by any template:\n\n${list}\n\n` +
+          `Remove them from the Placeholder Library too? (Built-in defaults are never removed.)`
+        );
+        if (remove) {
+          await Promise.all(
+            orphans.map((o) =>
+              fetch(`/api/placeholder-definitions/${o.id}?force=true`, {
+                method: 'DELETE',
+                credentials: 'include',
+              }).catch(() => null)
+            )
+          );
+        }
+      }
     } catch (e) {
       setError(e.message);
     }

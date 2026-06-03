@@ -12,6 +12,8 @@ import bcrypt from "bcryptjs";
 import PDFDocument from "pdfkit";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign } from "docx";
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
+import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
+import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1604,15 +1606,32 @@ function renderPDFTable(doc, table) {
 }
 
 // Export SOW to PDF
-app.get("/api/export/:id/pdf", isAuthenticated, (req, res) => {
+app.get("/api/export/:id/pdf", isAuthenticated, async (req, res) => {
   try {
     const sow = sowOps.getById(req.params.id);
     if (!sow) {
       return res.status(404).json({ error: "SOW not found" });
     }
 
-    const doc = new PDFDocument({ margin: 50 });
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.pdf`;
+
+    // Preferred path: render the exact same DOCX (Altera APAC template shell)
+    // to PDF via headless LibreOffice so the PDF matches the Word output.
+    // Falls back to the legacy pdfkit renderer if LibreOffice is unavailable.
+    if (isLibreOfficeAvailable()) {
+      try {
+        const docxBuffer = generateAiSowDocx(buildAiSowOptsFromSow(sow));
+        const pdfBuffer = await convertDocxToPdf(docxBuffer);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        return res.send(pdfBuffer);
+      } catch (convErr) {
+        console.error("LibreOffice PDF conversion failed, falling back to pdfkit:", convErr.message);
+        // fall through to pdfkit
+      }
+    }
+
+    const doc = new PDFDocument({ margin: 50 });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -1727,246 +1746,12 @@ app.get("/api/export/:id/docx", isAuthenticated, async (req, res) => {
       return res.status(404).json({ error: "SOW not found" });
     }
 
+    // AI-generated SOWs are produced from the official Altera APAC template
+    // shell (cover, headers, footers, Document Control, classification) with
+    // the AI body injected and client name / title / status driven by Word
+    // document properties. See services/ai-sow-shell.js.
     const filename = `SOW-${sow.account_name.replace(/\s+/g, "-")}-${Date.now()}.docx`;
-
-    // Helper function to parse inline markdown (bold) for DOCX
-    const parseInlineMarkdownForDocx = (text) => {
-      const textRuns = [];
-      const boldRegex = /\*\*(.*?)\*\*/g;
-      let lastIndex = 0;
-      let match;
-
-      while ((match = boldRegex.exec(text)) !== null) {
-        // Add text before the match
-        if (match.index > lastIndex) {
-          textRuns.push(
-            new TextRun({
-              text: text.substring(lastIndex, match.index),
-              font: "Verdana",
-              size: 19,
-            })
-          );
-        }
-        // Add bold text
-        textRuns.push(
-          new TextRun({
-            text: match[1],
-            bold: true,
-            font: "Verdana",
-            size: 19,
-          })
-        );
-        lastIndex = match.index + match[0].length;
-      }
-
-      // Add remaining text
-      if (lastIndex < text.length) {
-        textRuns.push(
-          new TextRun({
-            text: text.substring(lastIndex),
-            font: "Verdana",
-            size: 19,
-          })
-        );
-      }
-
-      return textRuns.length > 0 ? textRuns : [new TextRun({ text, font: "Verdana", size: 19 })];
-    };
-
-    // Parse content and create formatted paragraphs/tables.
-    // Strip the AI's leading Project/Client/Date/Version block — the cover
-    // page now carries that information.
-    const contentElements = [];
-    const lines = stripLeadingMetaBlock(sow.content).split('\n');
-    let i = 0;
-
-    while (i < lines.length) {
-      const line = lines[i];
-
-      if (line.trim() === '') {
-        contentElements.push(new Paragraph({ text: "" }));
-        i++;
-        continue;
-      }
-
-      // Check for table
-      if (line.trim().startsWith('|')) {
-        const table = parseTable(lines, i);
-        if (table) {
-          // Create table header row
-          const headerRow = new TableRow({
-            children: table.headers.map(header =>
-              new TableCell({
-                children: [
-                  new Paragraph({
-                    children: parseInlineMarkdownForDocx(header).map(run => {
-                      run.bold = true;
-                      run.color = "FFFFFF";
-                      return run;
-                    }),
-                  }),
-                ],
-                shading: {
-                  fill: "707CF1",
-                },
-                verticalAlign: VerticalAlign.CENTER,
-              })
-            ),
-          });
-
-          // Create table data rows
-          const dataRows = table.rows.map(row =>
-            new TableRow({
-              children: row.map(cell =>
-                new TableCell({
-                  children: [
-                    new Paragraph({
-                      children: parseInlineMarkdownForDocx(cell),
-                    }),
-                  ],
-                  verticalAlign: VerticalAlign.CENTER,
-                })
-              ),
-            })
-          );
-
-          // Create complete table
-          contentElements.push(
-            new Table({
-              rows: [headerRow, ...dataRows],
-              width: {
-                size: 100,
-                type: WidthType.PERCENTAGE,
-              },
-              borders: {
-                top: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-                bottom: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-                left: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-                right: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-                insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-                insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" },
-              },
-            })
-          );
-
-          i = table.endIndex;
-          continue;
-        }
-      }
-
-      // Check if line is a main header.
-      // AI-generated SOWs use ### for top-level sections (e.g. "### **1.0
-      // Solution Overview**") and #### for subsections, so 1–3 hashes map to
-      // Heading 1. Strip any ** bold wrapper from the heading text.
-      if (line.match(/^#{1,3}\s+/) || line.match(/^[A-Z\s]{3,}:?\s*$/)) {
-        const headerText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').trim();
-        contentElements.push(
-          new Paragraph({
-            // Real Word heading style so the Table of Contents (page 2) and
-            // Word's navigation pane both pick it up. The explicit run props
-            // keep the brand colour/size; the heading drives the outline level.
-            heading: HeadingLevel.HEADING_1,
-            children: [
-              new TextRun({
-                text: headerText,
-                bold: true,
-                font: "Verdana",
-                size: 32, // 16pt = 32 half-points
-                color: "707CF1",
-              }),
-            ],
-            spacing: { before: 200, after: 100 },
-          })
-        );
-      }
-      // Check if line is a subheader (#### and deeper, or a fully bold line)
-      else if (line.match(/^#{4,6}\s+/) || line.match(/^\*\*.*\*\*$/)) {
-        const subHeaderText = line.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
-        contentElements.push(
-          new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            children: [
-              new TextRun({
-                text: subHeaderText,
-                bold: true,
-                font: "Verdana",
-                size: 28, // 14pt = 28 half-points
-                color: "383392",
-              }),
-            ],
-            spacing: { before: 150, after: 75 },
-          })
-        );
-      }
-      // Check if line is a bullet point
-      else if (line.match(/^\s*[-*•]\s+/)) {
-        const bulletContent = line.replace(/^\s*[-*•]\s+/, '').trim();
-
-        // If content after bullet is entirely bold, treat as subheader
-        if (bulletContent.match(/^\*\*.*\*\*$/)) {
-          const subHeaderText = bulletContent.replace(/\*\*/g, '').trim();
-          contentElements.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: subHeaderText,
-                  bold: true,
-                  font: "Verdana",
-                  size: 28, // 14pt = 28 half-points
-                  color: "383392",
-                }),
-              ],
-              spacing: { before: 150, after: 75 },
-            })
-          );
-        } else {
-          // Regular bullet with better spacing
-          contentElements.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: '•  ', // Added extra space
-                  font: "Verdana",
-                  size: 19, // 9.5pt = 19 half-points
-                  color: "5E63CD",
-                }),
-                ...parseInlineMarkdownForDocx(bulletContent),
-              ],
-              indent: { left: 360 }, // Indent bullets
-            })
-          );
-        }
-      }
-      // Regular content
-      else {
-        contentElements.push(
-          new Paragraph({
-            children: parseInlineMarkdownForDocx(line),
-          })
-        );
-      }
-
-      i++;
-    }
-
-    // Front matter: cover (p1) + index/TOC (p2) + version & approval (p3),
-    // then the parsed body content.
-    const frontMatter = buildDocxFrontMatter(sow);
-
-    const doc = new Document({
-      features: { updateFields: true }, // prompt Word to populate the TOC page numbers on open
-      sections: [
-        {
-          properties: {},
-          children: [
-            ...frontMatter,
-            ...contentElements,
-          ],
-        },
-      ],
-    });
-
-    const buffer = await Packer.toBuffer(doc);
+    const buffer = generateAiSowDocx(buildAiSowOptsFromSow(sow));
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -2565,6 +2350,33 @@ app.patch("/api/placeholder-definitions/:id/reactivate", isAuthenticated, requir
   }
 });
 
+// Permanently delete a placeholder definition (admin only).
+// If the placeholder is still referenced by one or more templates, respond 409
+// with the usage list UNLESS ?force=true is supplied (warn-and-override flow).
+app.delete("/api/placeholder-definitions/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const def = placeholderDefinitionOps.getById(req.params.id);
+    if (!def) return res.status(404).json({ error: "Placeholder definition not found" });
+
+    const usedBy = fixedSOWTemplateOps.getTemplatesUsingKey(def.key);
+    const force = req.query.force === "true";
+    if (usedBy.length > 0 && !force) {
+      return res.status(409).json({
+        error: "Placeholder is in use",
+        inUse: true,
+        key: def.key,
+        templates: usedBy.map((t) => ({ id: t.id, name: t.name })),
+      });
+    }
+
+    placeholderDefinitionOps.delete(req.params.id);
+    res.json({ message: "Placeholder definition deleted", deletedId: Number(req.params.id) });
+  } catch (err) {
+    console.error("Error deleting placeholder definition:", err);
+    res.status(500).json({ error: "Failed to delete placeholder definition" });
+  }
+});
+
 // ============================================
 // FIXED SOW TEMPLATES ENDPOINTS (v3)
 // ============================================
@@ -2757,9 +2569,25 @@ app.delete("/api/fixed-templates/:id", isAuthenticated, requireAdmin, (req, res)
       }
     }
 
+    // Capture the placeholder keys this template used BEFORE deleting it.
+    const usedKeys = fixedSOWTemplateOps.getPlaceholderKeys(req.params.id);
+
     // Permanent delete from DB
     fixedSOWTemplateOps.delete(req.params.id);
-    res.json({ message: "Template deleted" });
+
+    // After removal, find placeholders that are now orphaned (referenced by no
+    // remaining template) AND are not seeded defaults — offer them for cleanup.
+    const orphaned = [];
+    for (const key of usedKeys) {
+      const def = placeholderDefinitionOps.getByKey(key);
+      if (!def || def.is_default) continue; // unknown key or protected default
+      const stillUsed = fixedSOWTemplateOps.getTemplatesUsingKey(key); // template already deleted
+      if (stillUsed.length === 0) {
+        orphaned.push({ id: def.id, key: def.key, label: def.label });
+      }
+    }
+
+    res.json({ message: "Template deleted", orphanedPlaceholders: orphaned });
   } catch (err) {
     console.error("Error deleting fixed template:", err);
     res.status(500).json({ error: "Failed to delete template" });
@@ -2870,4 +2698,11 @@ app.get(/.*/, (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Matcha SOW Application running at http://localhost:${PORT}`);
+  // Surface which PDF engine is active so a mismatched PDF (pdfkit fallback)
+  // vs the template-shell DOCX is easy to diagnose from the logs.
+  if (isLibreOfficeAvailable()) {
+    console.log("📄 PDF engine: LibreOffice (PDF will match the Word document)");
+  } else {
+    console.warn("⚠️  PDF engine: pdfkit fallback — PDF will NOT match the Word document. Install LibreOffice (sudo apt-get install -y libreoffice) for a matching PDF.");
+  }
 });

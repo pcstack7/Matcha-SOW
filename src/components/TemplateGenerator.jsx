@@ -78,6 +78,41 @@ function TemplateGenerator() {
     }
   };
 
+  // docx-preview renders text but NOT cover background images / shape fills, so
+  // a page with white text (e.g. the Altera navy cover) shows as blank white.
+  // For each rendered page that contains white / near-white text, add a class
+  // that paints a dark backdrop behind it so the text is legible. Pages with
+  // normal dark text are left untouched — safe for arbitrary templates.
+  const applyWhiteTextBackdrop = (container) => {
+    if (!container) return;
+    const isWhite = (c) => {
+      // Computed colour is always rgb()/rgba(); treat near-white as white.
+      const m = (c || '').replace(/\s/g, '').match(/^rgba?\((\d+),(\d+),(\d+)/i);
+      return !!m && +m[1] >= 240 && +m[2] >= 240 && +m[3] >= 240;
+    };
+    // docx-preview emits each page as <section class="docx">.
+    const pages = container.querySelectorAll('section');
+    pages.forEach((page) => {
+      let whiteRuns = 0;
+      let darkRuns = 0;
+      // Only leaf text nodes (spans) to avoid double-counting parent paragraphs;
+      // computed colour catches both inline and class-based styling.
+      page.querySelectorAll('span').forEach((el) => {
+        const txt = (el.textContent || '').trim();
+        if (!txt) return;
+        const col = window.getComputedStyle(el).color;
+        if (isWhite(col)) whiteRuns += 1;
+        else darkRuns += 1;
+      });
+      // Only darken when the page's coloured text is predominantly white.
+      if (whiteRuns > 0 && whiteRuns >= darkRuns) {
+        page.classList.add('preview-dark-cover');
+      } else {
+        page.classList.remove('preview-dark-cover');
+      }
+    });
+  };
+
   // ── Initial data load ──────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
@@ -214,6 +249,10 @@ function TemplateGenerator() {
         // Wait a frame so docx-preview's layout settles before measuring.
         await new Promise((r) => requestAnimationFrame(r));
         applyPreviewScale();
+        // docx-preview doesn't render cover background images/shapes, so a
+        // page whose text is white (e.g. the Altera cover) would look blank.
+        // Give any such page a dark backdrop so the white text is legible.
+        applyWhiteTextBackdrop(previewContainerRef.current);
       } catch (err) {
         if (version !== previewVersionRef.current) return;
         setPreviewError('Preview could not be generated. The downloaded file will still be correct.');
