@@ -109,6 +109,28 @@ function migrateDatabase() {
   } catch (err) {
     console.log('SOWs table migration skipped');
   }
+
+  // Add is_default flag to placeholder_definitions (distinguishes the seeded
+  // built-in placeholders from user-created ones, so cleanup never removes a
+  // standard default).
+  try {
+    const phInfo = db.prepare("PRAGMA table_info(placeholder_definitions)").all();
+    if (phInfo.length > 0 && !phInfo.some(c => c.name === 'is_default')) {
+      console.log('Migrating: Adding is_default column to placeholder_definitions...');
+      db.exec(`ALTER TABLE placeholder_definitions ADD COLUMN is_default INTEGER DEFAULT 0`);
+      // Backfill: mark the known seeded keys as defaults.
+      const seededKeys = [
+        'CLIENT_FULL_NAME', 'CLIENT_SHORT_NAME', 'CLIENT_NUMBER', 'CLIENT_COUNTRY',
+        'CLIENT_SITES', 'QUOTE_NUMBER', 'SOW_DATE', 'SOW_VERSION', 'PROJECT_TITLE',
+        'TOTAL_FEE', 'CURRENCY', 'FEE_VALIDITY_DAYS', 'PAYMENT_TERMS', 'TIMELINE_MONTHS',
+        'NUM_FACILITIES', 'NUM_EFORMS', 'PRODUCT_FROM_VERSION', 'PRODUCT_TO_VERSION',
+      ];
+      const mark = db.prepare('UPDATE placeholder_definitions SET is_default = 1 WHERE key = ?');
+      for (const k of seededKeys) mark.run(k);
+    }
+  } catch (err) {
+    console.log('placeholder_definitions is_default migration skipped:', err.message);
+  }
 }
 
 // Initialize database schema
@@ -287,6 +309,7 @@ function initializeDatabase() {
       input_type    TEXT NOT NULL DEFAULT 'text',
       input_options TEXT,
       is_active     INTEGER DEFAULT 1,
+      is_default    INTEGER DEFAULT 0,
       sort_order    INTEGER DEFAULT 0,
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -322,8 +345,8 @@ function seedPlaceholderDefinitions() {
 
   const insert = db.prepare(`
     INSERT INTO placeholder_definitions
-      (key, label, description, data_source, detect_regex, input_type, input_options, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (key, label, description, data_source, detect_regex, input_type, input_options, sort_order, is_default)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
   `);
 
   const placeholders = [
@@ -1466,6 +1489,16 @@ export const placeholderDefinitionOps = {
   reactivate: (id) => {
     db.prepare('UPDATE placeholder_definitions SET is_active = 1 WHERE id = ?').run(id);
   },
+
+  getByKey: (key) => {
+    return db.prepare('SELECT * FROM placeholder_definitions WHERE key = ?').get(key);
+  },
+
+  // Permanently remove a placeholder definition. Templates that still reference
+  // the key by name keep working (they fall back to a generic text field).
+  delete: (id) => {
+    db.prepare('DELETE FROM placeholder_definitions WHERE id = ?').run(id);
+  },
 };
 
 // Fixed SOW Template operations (v3)
@@ -1540,6 +1573,36 @@ export const fixedSOWTemplateOps = {
 
   delete: (id) => {
     db.prepare('DELETE FROM fixed_sow_templates WHERE id = ?').run(id);
+  },
+
+  // Return the list of placeholder keys a given template references.
+  getPlaceholderKeys: (id) => {
+    const row = db.prepare('SELECT placeholders FROM fixed_sow_templates WHERE id = ?').get(id);
+    if (!row) return [];
+    try {
+      return (JSON.parse(row.placeholders || '[]'))
+        .map((p) => (typeof p === 'string' ? p : p && p.key))
+        .filter(Boolean);
+    } catch { return []; }
+  },
+
+  // Return active+inactive templates (optionally excluding one id) that
+  // reference a given placeholder key — used to warn before deletion and to
+  // detect orphans after a template is removed.
+  getTemplatesUsingKey: (key, excludeId = null) => {
+    const rows = db.prepare('SELECT id, name, placeholders, is_active FROM fixed_sow_templates').all();
+    const using = [];
+    for (const r of rows) {
+      if (excludeId != null && r.id === Number(excludeId)) continue;
+      let keys = [];
+      try {
+        keys = (JSON.parse(r.placeholders || '[]'))
+          .map((p) => (typeof p === 'string' ? p : p && p.key))
+          .filter(Boolean);
+      } catch { /* ignore malformed */ }
+      if (keys.includes(key)) using.push({ id: r.id, name: r.name, is_active: r.is_active });
+    }
+    return using;
   },
 };
 

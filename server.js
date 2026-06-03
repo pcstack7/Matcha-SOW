@@ -2350,6 +2350,33 @@ app.patch("/api/placeholder-definitions/:id/reactivate", isAuthenticated, requir
   }
 });
 
+// Permanently delete a placeholder definition (admin only).
+// If the placeholder is still referenced by one or more templates, respond 409
+// with the usage list UNLESS ?force=true is supplied (warn-and-override flow).
+app.delete("/api/placeholder-definitions/:id", isAuthenticated, requireAdmin, (req, res) => {
+  try {
+    const def = placeholderDefinitionOps.getById(req.params.id);
+    if (!def) return res.status(404).json({ error: "Placeholder definition not found" });
+
+    const usedBy = fixedSOWTemplateOps.getTemplatesUsingKey(def.key);
+    const force = req.query.force === "true";
+    if (usedBy.length > 0 && !force) {
+      return res.status(409).json({
+        error: "Placeholder is in use",
+        inUse: true,
+        key: def.key,
+        templates: usedBy.map((t) => ({ id: t.id, name: t.name })),
+      });
+    }
+
+    placeholderDefinitionOps.delete(req.params.id);
+    res.json({ message: "Placeholder definition deleted", deletedId: Number(req.params.id) });
+  } catch (err) {
+    console.error("Error deleting placeholder definition:", err);
+    res.status(500).json({ error: "Failed to delete placeholder definition" });
+  }
+});
+
 // ============================================
 // FIXED SOW TEMPLATES ENDPOINTS (v3)
 // ============================================
@@ -2542,9 +2569,25 @@ app.delete("/api/fixed-templates/:id", isAuthenticated, requireAdmin, (req, res)
       }
     }
 
+    // Capture the placeholder keys this template used BEFORE deleting it.
+    const usedKeys = fixedSOWTemplateOps.getPlaceholderKeys(req.params.id);
+
     // Permanent delete from DB
     fixedSOWTemplateOps.delete(req.params.id);
-    res.json({ message: "Template deleted" });
+
+    // After removal, find placeholders that are now orphaned (referenced by no
+    // remaining template) AND are not seeded defaults — offer them for cleanup.
+    const orphaned = [];
+    for (const key of usedKeys) {
+      const def = placeholderDefinitionOps.getByKey(key);
+      if (!def || def.is_default) continue; // unknown key or protected default
+      const stillUsed = fixedSOWTemplateOps.getTemplatesUsingKey(key); // template already deleted
+      if (stillUsed.length === 0) {
+        orphaned.push({ id: def.id, key: def.key, label: def.label });
+      }
+    }
+
+    res.json({ message: "Template deleted", orphanedPlaceholders: orphaned });
   } catch (err) {
     console.error("Error deleting fixed template:", err);
     res.status(500).json({ error: "Failed to delete template" });

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { EditIcon, DeactivateIcon, ActivateIcon } from './Icons';
+import { EditIcon, DeactivateIcon, ActivateIcon, DeleteIcon } from './Icons';
 
 const INPUT_TYPES = [
   { value: 'text',     label: 'Text input',     hint: 'Single-line free text' },
@@ -170,6 +170,40 @@ function PlaceholderLibrary({ userRole }) {
     }
   };
 
+  // Permanent delete. If the backend reports the placeholder is in use (409),
+  // surface the template list and let the admin confirm a forced delete.
+  const handleDelete = async (item) => {
+    if (!window.confirm(`Permanently delete the placeholder "${item.label}" (${item.key})? This cannot be undone.`)) return;
+    try {
+      let response = await fetch(`/api/placeholder-definitions/${item.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (response.status === 409) {
+        const data = await response.json();
+        const names = (data.templates || []).map((t) => `• ${t.name}`).join('\n');
+        const proceed = window.confirm(
+          `"${item.label}" is still used by ${data.templates.length} template(s):\n\n${names}\n\n` +
+          `Deleting it will make those templates fall back to a plain text field for this placeholder. Delete anyway?`
+        );
+        if (!proceed) return;
+        response = await fetch(`/api/placeholder-definitions/${item.id}?force=true`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+      }
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete');
+      }
+      loadItems();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const typeLabel = (type) => {
     const t = INPUT_TYPES.find((it) => it.value === type);
     return t ? t.label : type;
@@ -333,6 +367,11 @@ function PlaceholderLibrary({ userRole }) {
                               data-tooltip="Reactivate"
                             ><ActivateIcon /></button>
                           )}
+                          <button
+                            className="icon-btn icon-btn-delete"
+                            onClick={() => handleDelete(item)}
+                            data-tooltip="Delete permanently"
+                          ><DeleteIcon /></button>
                         </div>
                       </td>
                     )}
