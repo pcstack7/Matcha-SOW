@@ -2655,4 +2655,11 @@ app.get(/.*/, (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Matcha SOW Application running at http://localhost:${PORT}`);
+  // Surface which PDF engine is active so a mismatched PDF (pdfkit fallback)
+  // vs the template-shell DOCX is easy to diagnose from the logs.
+  if (isLibreOfficeAvailable()) {
+    console.log("📄 PDF engine: LibreOffice (PDF will match the Word document)");
+  } else {
+    console.warn("⚠️  PDF engine: pdfkit fallback — PDF will NOT match the Word document. Install LibreOffice (sudo apt-get install -y libreoffice) for a matching PDF.");
+  }
 });

@@ -80,6 +80,21 @@ const headingPara = (style, text) =>
   `<w:p><w:pPr><w:pStyle w:val="${style}"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr>` +
   `<w:r><w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p>`;
 
+// "Table N" caption (Caption style + SEQ Table field) placed above each table.
+// The template's NATIVE List of Tables field (TOC \c "Table") collects these,
+// so injected tables show up in the document's table references. Word renumbers
+// the SEQ fields on field-refresh; we seed the cached number for pre-refresh.
+let _tableSeq = 0;
+function tableCaption() {
+  _tableSeq += 1;
+  return (
+    `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>` +
+    `<w:r><w:t xml:space="preserve">Table </w:t></w:r>` +
+    `<w:fldSimple w:instr=" SEQ Table \\* ARABIC "><w:r><w:t>${_tableSeq}</w:t></w:r></w:fldSimple>` +
+    `</w:p>`
+  );
+}
+
 // ── Markdown table parsing (reused shape from the existing exporters) ──────────
 function parseTableBlock(lines, start) {
   const headerLine = lines[start];
@@ -101,8 +116,10 @@ function tableXml(tbl) {
   const cols = tbl.headers.length || 1;
   const cellW = Math.floor(9360 / cols);
   const grid = `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${cellW}"/>`).join('')}</w:tblGrid>`;
+  // Header fill 383392 (Altera primary purple) matches the Document Control /
+  // Version History table's header band so every table is colour-consistent.
   const cell = (text, header) =>
-    `<w:tc><w:tcPr><w:tcW w:w="${cellW}" w:type="dxa"/>${header ? '<w:shd w:val="clear" w:color="auto" w:fill="707CF1"/>' : ''}<w:vAlign w:val="center"/></w:tcPr>` +
+    `<w:tc><w:tcPr><w:tcW w:w="${cellW}" w:type="dxa"/>${header ? '<w:shd w:val="clear" w:color="auto" w:fill="383392"/>' : ''}<w:vAlign w:val="center"/></w:tcPr>` +
     `<w:p><w:pPr><w:pStyle w:val="BodyText"/></w:pPr>` +
     inlineRuns(text, { runStyle: header ? null : 'BodyVerdana' }).replace(
       /<w:rPr>/g,
@@ -134,6 +151,7 @@ function tableXml(tbl) {
  *   everything else → BodyText
  */
 export function markdownToOoxml(markdown) {
+  _tableSeq = 0; // restart table caption numbering per document
   // Drop the AI's leading "Statement of Work / Project / Client / Date /
   // Version / ---" block — the cover already carries that information.
   const lines = stripLeadingMetaBlock(String(markdown || '')).split('\n');
@@ -145,10 +163,11 @@ export function markdownToOoxml(markdown) {
 
     if (trimmed === '') { i++; continue; }
 
-    // Table
+    // Table — captioned "Table N" so the template's native List of Tables
+    // (TOC \c "Table") picks it up.
     if (trimmed.startsWith('|')) {
       const tbl = parseTableBlock(lines, i);
-      if (tbl) { out.push(tableXml(tbl)); i = tbl.endIndex; continue; }
+      if (tbl) { out.push(tableCaption() + tableXml(tbl)); i = tbl.endIndex; continue; }
     }
 
     // Headings — 1-3 hashes (or ALL CAPS) = Heading1; 4-6 hashes = Heading2.
