@@ -171,6 +171,28 @@ export async function extractTemplateTree(template) {
   }
 }
 
+// ── Outline rendering (for outline-first generation) ───────────────────────────
+// Produce an indented, exact-title outline of the template's BODY sections
+// (front matter excluded), e.g.
+//   - Introduction
+//     - Document Purpose
+//     - Background
+//   - Scope
+// Used to instruct the AI to generate directly into the template's structure.
+export function outlineToText(tree) {
+  if (!tree || !tree.children) return '';
+  const lines = [];
+  const walk = (node, depth) => {
+    for (const child of node.children) {
+      if (isFrontMatter(normalizeTitle(child.title))) continue;
+      lines.push(`${'  '.repeat(depth)}- ${child.title.replace(/\*\*/g, '').trim()}`);
+      walk(child, depth + 1);
+    }
+  };
+  walk(tree, 0);
+  return lines.join('\n');
+}
+
 // ── Title normalisation + matching ─────────────────────────────────────────────
 export function normalizeTitle(t) {
   return String(t || '')
@@ -322,4 +344,4 @@ export function mergeTemplateSections(aiMarkdown, templateTree) {
   return { content, inserted };
 }
 
-export default { extractTemplateTree, mergeTemplateSections, normalizeTitle };
+export default { extractTemplateTree, mergeTemplateSections, normalizeTitle, outlineToText };

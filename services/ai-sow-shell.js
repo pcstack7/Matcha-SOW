@@ -71,14 +71,17 @@ function inlineRuns(text, { runStyle = 'BodyVerdana' } = {}) {
 const para = (style, innerRuns) =>
   `<w:p><w:pPr><w:pStyle w:val="${style}"/></w:pPr>${innerRuns}</w:p>`;
 
-// Heading paragraph that SUPPRESSES the template's built-in heading auto-
-// numbering (Heading1/2/3 carry numId=35). AI SOW content already includes
-// its own section numbers ("1.0", "2.1", …), so we keep those literal numbers
-// and turn off the style numbering (numId=0) to avoid double numbering like
-// "1.1.0 Solution Overview".
+// Heading paragraph that uses the template's built-in heading style numbering.
+// The template's Heading1/2/3 styles auto-number (numId=35), so we DON'T
+// suppress it and we strip any manual "1.0 "/"2.1 " prefix the model may have
+// emitted — Word then numbers headings automatically and consistently
+// (1, 1.1, 2 …) regardless of which sections are present. This avoids both the
+// "numbering is gone" problem and double numbering like "1.1.0 …".
+const stripLeadingNumber = (t) =>
+  String(t || '').replace(/^\s*\d+(?:\.\d+)*\.?\s+/, '').trim();
 const headingPara = (style, text) =>
-  `<w:p><w:pPr><w:pStyle w:val="${style}"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr>` +
-  `<w:r><w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p>`;
+  `<w:p><w:pPr><w:pStyle w:val="${style}"/></w:pPr>` +
+  `<w:r><w:t xml:space="preserve">${esc(stripLeadingNumber(text))}</w:t></w:r></w:p>`;
 
 // "Table N" caption (Caption style + SEQ Table field) placed above each table.
 // The template's NATIVE List of Tables field (TOC \c "Table") collects these,
@@ -170,17 +173,24 @@ export function markdownToOoxml(markdown) {
       if (tbl) { out.push(tableCaption() + tableXml(tbl)); i = tbl.endIndex; continue; }
     }
 
-    // Headings — 1-3 hashes (or ALL CAPS) = Heading1; 4-6 hashes = Heading2.
-    // Auto-numbering is suppressed (headingPara) so the AI's own section
-    // numbers are the only ones shown.
-    if (/^#{1,3}\s+/.test(line) || /^[A-Z][A-Z\s]{2,}:?\s*$/.test(trimmed)) {
-      const t = trimmed.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').replace(/:$/, '').trim();
-      out.push(headingPara('Heading1', t));
+    // Headings — map by hash count so hierarchy is preserved. The SOW uses
+    // '## ' for top-level sections and '### ' for sub-sections, so:
+    //   #/##  → Heading1,  ###  → Heading2,  ####+ → Heading3.
+    // Word's heading styles auto-number these (1, 1.1, 1.1.1).
+    const hashMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    if (hashMatch) {
+      const level = Math.min(3, Math.max(1, hashMatch[1].length - 1));
+      const t = hashMatch[2].replace(/\*\*/g, '').replace(/:$/, '').trim();
+      out.push(headingPara(`Heading${level}`, t));
       i++; continue;
     }
-    if (/^#{4,6}\s+/.test(line) || /^\*\*.*\*\*$/.test(trimmed)) {
-      const t = trimmed.replace(/^#{4,6}\s+/, '').replace(/\*\*/g, '').trim();
-      out.push(headingPara('Heading2', t));
+    // ALL-CAPS line → top-level heading; fully-bold line → sub-heading.
+    if (/^[A-Z][A-Z\s]{2,}:?\s*$/.test(trimmed)) {
+      out.push(headingPara('Heading1', trimmed.replace(/:$/, '').trim()));
+      i++; continue;
+    }
+    if (/^\*\*.*\*\*$/.test(trimmed)) {
+      out.push(headingPara('Heading2', trimmed.replace(/\*\*/g, '').trim()));
       i++; continue;
     }
 

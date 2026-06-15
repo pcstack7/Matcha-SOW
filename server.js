@@ -14,7 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
 import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
-import { extractTemplateTree, mergeTemplateSections } from "./services/ai-template-merge.js";
+import { extractTemplateTree, mergeTemplateSections, outlineToText } from "./services/ai-template-merge.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1336,11 +1336,21 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
     let templateContent = "";
     let templateName = "";
     let selectedTemplate = null;
+    let templateTree = null;     // parsed section tree (reused for the safety-net merge)
+    let templateOutline = "";    // exact indented outline for outline-first generation
     if (template_id) {
       selectedTemplate = templateOps.getById(template_id);
       if (selectedTemplate) {
         templateName = selectedTemplate.name;
-        if (selectedTemplate.content) {
+        try {
+          templateTree = await extractTemplateTree(selectedTemplate);
+          templateOutline = outlineToText(templateTree);
+        } catch (e) {
+          console.warn("Could not parse template outline:", e.message);
+        }
+        // Only fall back to the raw reference text when we couldn't derive a
+        // structured outline (outline-first generation is preferred).
+        if (!templateOutline && selectedTemplate.content) {
           templateContent = `\n\nUse this template as a reference:\n${selectedTemplate.content}`;
         }
       }
@@ -1416,18 +1426,25 @@ ${project_notes}
 Deliverables:
 ${deliverables}${assumptionSection}${outOfScopeSection}${templateContent}
 
-Please generate a complete, professional SOW document with appropriate sections including:
+${templateOutline
+  ? `Produce the SOW using EXACTLY the following section structure, in this exact order. Use these headings verbatim — do NOT rename, merge, split, add, or reorder sections, and do NOT add section numbers (numbering is applied automatically):
+
+${templateOutline}
+
+Use markdown headings — '## ' for top-level sections and '### ' for the indented sub-sections shown above. Fill each section with professional, client-specific content drawn from the project notes and deliverables; where you have no specific information for a section, write appropriate professional content consistent with that heading's purpose.`
+  : `Please generate a complete, professional SOW document with appropriate sections including:
 - Executive Summary
 - Project Scope
 - Deliverables
 - Timeline
 - Terms and Conditions
-- Acceptance Criteria${assumptionInstruction}${outOfScopeInstruction}
+- Acceptance Criteria
+- Use markdown headings (## Section Title) for all top-level sections.`}${assumptionInstruction}${outOfScopeInstruction}
 
 IMPORTANT FORMATTING RULES:
-- Use markdown headings (## Section Title) for all top-level sections.
+- Do NOT prefix headings with manual numbers (e.g. write "## Scope", not "## 2.0 Scope") — numbering is applied automatically on export.
 - If Assumptions are provided, place them under the exact heading "## Assumptions" and copy each item exactly as given — do not paraphrase or reorder.
-- If Out of Scope items are provided, place them under the exact heading "## Out of Scope" and copy each item exactly as given — do not paraphrase or reorder.${templateName ? `\n- Adhere to the structure and tone of the "${templateName}" template where possible.` : ""}
+- If Out of Scope items are provided, place them under the exact heading "## Out of Scope" and copy each item exactly as given — do not paraphrase or reorder.
 
 Format the output as a well-structured document with clear section headers and subheaders.`;
 
@@ -1466,13 +1483,15 @@ Format the output as a well-structured document with clear section headers and s
     // fill in any sections/subsections the template has that the generated SOW
     // is missing (template content verbatim, in template-relative position).
     // Sections the SOW already has keep the AI's client-specific content.
-    if (selectedTemplate) {
+    if (selectedTemplate && templateTree) {
       try {
-        const templateTree = await extractTemplateTree(selectedTemplate);
+        // Safety net: with outline-first generation the AI uses the exact
+        // template titles, so any sections it still skipped are matched
+        // exactly and inserted in the right place/level (no semantic dupes).
         const merged = mergeTemplateSections(content, templateTree);
         if (merged.inserted.length > 0) {
           content = merged.content;
-          console.log(`✅ Template merge: added ${merged.inserted.length} missing section(s) from "${templateName}": ${merged.inserted.join(', ')}`);
+          console.log(`✅ Template safety-net: added ${merged.inserted.length} section(s) the AI omitted from "${templateName}": ${merged.inserted.join(', ')}`);
         }
       } catch (mergeErr) {
         console.error('Template section merge failed (continuing without it):', mergeErr.message);
