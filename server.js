@@ -14,6 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
 import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
+import { extractTemplateTree, mergeTemplateSections } from "./services/ai-template-merge.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1334,12 +1335,13 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
     // Get template if provided (for content reference and name)
     let templateContent = "";
     let templateName = "";
+    let selectedTemplate = null;
     if (template_id) {
-      const template = templateOps.getById(template_id);
-      if (template) {
-        templateName = template.name;
-        if (template.content) {
-          templateContent = `\n\nUse this template as a reference:\n${template.content}`;
+      selectedTemplate = templateOps.getById(template_id);
+      if (selectedTemplate) {
+        templateName = selectedTemplate.name;
+        if (selectedTemplate.content) {
+          templateContent = `\n\nUse this template as a reference:\n${selectedTemplate.content}`;
         }
       }
     }
@@ -1454,10 +1456,27 @@ Format the output as a well-structured document with clear section headers and s
 
     // Post-process: guarantee Assumptions and Out of Scope sections contain
     // the exact curated items verbatim, regardless of what Matcha produced.
-    const content = postProcessSOW(rawContent, rawAssumptionItems, rawOutOfScopeItems);
+    let content = postProcessSOW(rawContent, rawAssumptionItems, rawOutOfScopeItems);
 
     if (rawAssumptionItems.length > 0 || rawOutOfScopeItems.length > 0) {
       console.log(`✅ SOW post-processed: ${rawAssumptionItems.length} assumption(s), ${rawOutOfScopeItems.length} out-of-scope item(s) injected verbatim.`);
+    }
+
+    // If an AI template was selected, ensure the SOW follows its structure:
+    // fill in any sections/subsections the template has that the generated SOW
+    // is missing (template content verbatim, in template-relative position).
+    // Sections the SOW already has keep the AI's client-specific content.
+    if (selectedTemplate) {
+      try {
+        const templateTree = await extractTemplateTree(selectedTemplate);
+        const merged = mergeTemplateSections(content, templateTree);
+        if (merged.inserted.length > 0) {
+          content = merged.content;
+          console.log(`✅ Template merge: added ${merged.inserted.length} missing section(s) from "${templateName}": ${merged.inserted.join(', ')}`);
+        }
+      } catch (mergeErr) {
+        console.error('Template section merge failed (continuing without it):', mergeErr.message);
+      }
     }
 
     // Save SOW to database with user tracking
