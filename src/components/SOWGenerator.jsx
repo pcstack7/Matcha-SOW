@@ -79,10 +79,20 @@ function SOWGenerator() {
     return () => { cancelled = true; };
   }, [formData.template_id]);
 
-  const toggleIntact = (norm) => {
+  // Toggle a section by its index; cascade the same state to its sub-sections
+  // (the following contiguous entries with a deeper level). So ticking a main
+  // header selects all its sub-sections, and unticking clears them.
+  const toggleIntact = (index) => {
+    const node = templateSections[index];
+    if (!node) return;
+    const target = !intactSections.has(node.norm);
+    const affected = [node.norm];
+    for (let j = index + 1; j < templateSections.length && templateSections[j].level > node.level; j++) {
+      affected.push(templateSections[j].norm);
+    }
     setIntactSections((prev) => {
       const next = new Set(prev);
-      if (next.has(norm)) next.delete(norm); else next.add(norm);
+      affected.forEach((n) => (target ? next.add(n) : next.delete(n)));
       return next;
     });
   };
@@ -323,7 +333,7 @@ function SOWGenerator() {
                         <input
                           type="checkbox"
                           checked={intactSections.has(s.norm)}
-                          onChange={() => toggleIntact(s.norm)}
+                          onChange={() => toggleIntact(idx)}
                         />
                         <span style={{ fontWeight: s.level === 0 ? 600 : 400 }}>{s.title}</span>
                         {intactSections.has(s.norm) && (
