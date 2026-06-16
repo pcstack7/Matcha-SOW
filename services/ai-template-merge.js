@@ -179,18 +179,38 @@ export async function extractTemplateTree(template) {
 //     - Background
 //   - Scope
 // Used to instruct the AI to generate directly into the template's structure.
-export function outlineToText(tree) {
+export function outlineToText(tree, exclude) {
   if (!tree || !tree.children) return '';
+  const skip = exclude instanceof Set ? exclude : new Set(exclude || []);
   const lines = [];
   const walk = (node, depth) => {
     for (const child of node.children) {
-      if (isFrontMatter(normalizeTitle(child.title))) continue;
+      const norm = normalizeTitle(child.title);
+      if (isFrontMatter(norm)) continue;
+      if (skip.has(norm)) continue; // locked/intact → omit it AND its subtree
       lines.push(`${'  '.repeat(depth)}- ${child.title.replace(/\*\*/g, '').trim()}`);
       walk(child, depth + 1);
     }
   };
   walk(tree, 0);
   return lines.join('\n');
+}
+
+// Flat, ordered list of the template's BODY sections (front matter excluded)
+// for the per-generation "keep intact" picker. Each entry carries its depth
+// and normalised title (the stable key the generate call references).
+export function flattenBodySections(tree) {
+  const out = [];
+  const walk = (node, depth) => {
+    for (const child of (node.children || [])) {
+      const norm = normalizeTitle(child.title);
+      if (isFrontMatter(norm)) continue;
+      out.push({ title: child.title.replace(/\*\*/g, '').trim(), norm, level: depth });
+      walk(child, depth + 1);
+    }
+  };
+  walk(tree, 0);
+  return out;
 }
 
 // ── Title normalisation + matching ─────────────────────────────────────────────
@@ -344,4 +364,6 @@ export function mergeTemplateSections(aiMarkdown, templateTree) {
   return { content, inserted };
 }
 
-export default { extractTemplateTree, mergeTemplateSections, normalizeTitle, outlineToText };
+export default {
+  extractTemplateTree, mergeTemplateSections, normalizeTitle, outlineToText, flattenBodySections,
+};

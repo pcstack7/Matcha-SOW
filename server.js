@@ -14,7 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
 import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
-import { extractTemplateTree, mergeTemplateSections, outlineToText } from "./services/ai-template-merge.js";
+import { extractTemplateTree, mergeTemplateSections, outlineToText, flattenBodySections, normalizeTitle } from "./services/ai-template-merge.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1173,6 +1173,20 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
   }
 });
 
+// Get a template's body section outline (for the "keep intact" picker on the
+// AI generate screen). Returns ordered sections with depth + a stable key.
+app.get("/api/templates/:id/outline", isAuthenticated, async (req, res) => {
+  try {
+    const template = templateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    const tree = await extractTemplateTree(template);
+    res.json({ id: template.id, name: template.name, sections: flattenBodySections(tree) });
+  } catch (err) {
+    console.error("Error building template outline:", err);
+    res.status(500).json({ error: "Failed to build template outline" });
+  }
+});
+
 // ============================================
 // SOW MANAGEMENT ENDPOINTS
 // ============================================
@@ -1320,7 +1334,13 @@ function replaceOrInsertSection(content, aliases, items, canonicalTitle, insertB
 // Generate SOW using AI
 app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
   try {
-    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, assumption_set_ids, out_of_scope_set_ids } = req.body;
+    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, assumption_set_ids, out_of_scope_set_ids, intact_sections } = req.body;
+
+    // Template sections the user chose to keep verbatim (not AI-generated).
+    // Normalised so they can be matched against the parsed template outline.
+    const intactNorms = new Set(
+      (Array.isArray(intact_sections) ? intact_sections : []).map((t) => normalizeTitle(t))
+    );
 
     if (!account_id || !project_notes || !deliverables) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -1344,7 +1364,9 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
         templateName = selectedTemplate.name;
         try {
           templateTree = await extractTemplateTree(selectedTemplate);
-          templateOutline = outlineToText(templateTree);
+          // Omit "keep intact" sections from the outline sent to the AI — they
+          // are inserted verbatim from the template by the safety-net merge.
+          templateOutline = outlineToText(templateTree, intactNorms);
         } catch (e) {
           console.warn("Could not parse template outline:", e.message);
         }
