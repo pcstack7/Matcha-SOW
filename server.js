@@ -14,6 +14,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { buildDocxFrontMatter, renderPdfFrontMatter, stripLeadingMetaBlock } from "./services/sow-frontmatter.js";
 import { generateAiSowDocx, buildAiSowOptsFromSow } from "./services/ai-sow-shell.js";
 import { convertDocxToPdf, isLibreOfficeAvailable } from "./services/docx-to-pdf.js";
+import { extractTemplateTree, mergeTemplateSections, outlineToText, flattenBodySections, normalizeTitle } from "./services/ai-template-merge.js";
 import { accountOps, templateOps, sowOps, userOps, productOps, engagementTypeOps, uploadedSOWOps, dashboardOps, scopeItemOps, scopeSetOps, placeholderDefinitionOps, fixedSOWTemplateOps } from "./database.js";
 import { scanDocument, extractText } from "./services/docx-scanner.js";
 import { injectPlaceholders } from "./services/docx-injector.js";
@@ -1172,6 +1173,20 @@ app.get("/api/templates/:id/content", isAuthenticated, async (req, res) => {
   }
 });
 
+// Get a template's body section outline (for the "keep intact" picker on the
+// AI generate screen). Returns ordered sections with depth + a stable key.
+app.get("/api/templates/:id/outline", isAuthenticated, async (req, res) => {
+  try {
+    const template = templateOps.getById(req.params.id);
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    const tree = await extractTemplateTree(template);
+    res.json({ id: template.id, name: template.name, sections: flattenBodySections(tree) });
+  } catch (err) {
+    console.error("Error building template outline:", err);
+    res.status(500).json({ error: "Failed to build template outline" });
+  }
+});
+
 // ============================================
 // SOW MANAGEMENT ENDPOINTS
 // ============================================
@@ -1319,7 +1334,13 @@ function replaceOrInsertSection(content, aliases, items, canonicalTitle, insertB
 // Generate SOW using AI
 app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
   try {
-    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, assumption_set_ids, out_of_scope_set_ids } = req.body;
+    const { account_id, template_id, product_id, engagement_type_id, project_notes, deliverables, assumption_set_ids, out_of_scope_set_ids, intact_sections } = req.body;
+
+    // Template sections the user chose to keep verbatim (not AI-generated).
+    // Normalised so they can be matched against the parsed template outline.
+    const intactNorms = new Set(
+      (Array.isArray(intact_sections) ? intact_sections : []).map((t) => normalizeTitle(t))
+    );
 
     if (!account_id || !project_notes || !deliverables) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -1334,12 +1355,25 @@ app.post("/api/sows/generate", isAuthenticated, async (req, res) => {
     // Get template if provided (for content reference and name)
     let templateContent = "";
     let templateName = "";
+    let selectedTemplate = null;
+    let templateTree = null;     // parsed section tree (reused for the safety-net merge)
+    let templateOutline = "";    // exact indented outline for outline-first generation
     if (template_id) {
-      const template = templateOps.getById(template_id);
-      if (template) {
-        templateName = template.name;
-        if (template.content) {
-          templateContent = `\n\nUse this template as a reference:\n${template.content}`;
+      selectedTemplate = templateOps.getById(template_id);
+      if (selectedTemplate) {
+        templateName = selectedTemplate.name;
+        try {
+          templateTree = await extractTemplateTree(selectedTemplate);
+          // Omit "keep intact" sections from the outline sent to the AI — they
+          // are inserted verbatim from the template by the safety-net merge.
+          templateOutline = outlineToText(templateTree, intactNorms);
+        } catch (e) {
+          console.warn("Could not parse template outline:", e.message);
+        }
+        // Only fall back to the raw reference text when we couldn't derive a
+        // structured outline (outline-first generation is preferred).
+        if (!templateOutline && selectedTemplate.content) {
+          templateContent = `\n\nUse this template as a reference:\n${selectedTemplate.content}`;
         }
       }
     }
@@ -1414,18 +1448,25 @@ ${project_notes}
 Deliverables:
 ${deliverables}${assumptionSection}${outOfScopeSection}${templateContent}
 
-Please generate a complete, professional SOW document with appropriate sections including:
+${templateOutline
+  ? `Produce the SOW using EXACTLY the following section structure, in this exact order. Use these headings verbatim — do NOT rename, merge, split, add, or reorder sections, and do NOT add section numbers (numbering is applied automatically):
+
+${templateOutline}
+
+Use markdown headings — '## ' for top-level sections and '### ' for the indented sub-sections shown above. Fill each section with professional, client-specific content drawn from the project notes and deliverables; where you have no specific information for a section, write appropriate professional content consistent with that heading's purpose.`
+  : `Please generate a complete, professional SOW document with appropriate sections including:
 - Executive Summary
 - Project Scope
 - Deliverables
 - Timeline
 - Terms and Conditions
-- Acceptance Criteria${assumptionInstruction}${outOfScopeInstruction}
+- Acceptance Criteria
+- Use markdown headings (## Section Title) for all top-level sections.`}${assumptionInstruction}${outOfScopeInstruction}
 
 IMPORTANT FORMATTING RULES:
-- Use markdown headings (## Section Title) for all top-level sections.
+- Do NOT prefix headings with manual numbers (e.g. write "## Scope", not "## 2.0 Scope") — numbering is applied automatically on export.
 - If Assumptions are provided, place them under the exact heading "## Assumptions" and copy each item exactly as given — do not paraphrase or reorder.
-- If Out of Scope items are provided, place them under the exact heading "## Out of Scope" and copy each item exactly as given — do not paraphrase or reorder.${templateName ? `\n- Adhere to the structure and tone of the "${templateName}" template where possible.` : ""}
+- If Out of Scope items are provided, place them under the exact heading "## Out of Scope" and copy each item exactly as given — do not paraphrase or reorder.
 
 Format the output as a well-structured document with clear section headers and subheaders.`;
 
@@ -1454,10 +1495,29 @@ Format the output as a well-structured document with clear section headers and s
 
     // Post-process: guarantee Assumptions and Out of Scope sections contain
     // the exact curated items verbatim, regardless of what Matcha produced.
-    const content = postProcessSOW(rawContent, rawAssumptionItems, rawOutOfScopeItems);
+    let content = postProcessSOW(rawContent, rawAssumptionItems, rawOutOfScopeItems);
 
     if (rawAssumptionItems.length > 0 || rawOutOfScopeItems.length > 0) {
       console.log(`✅ SOW post-processed: ${rawAssumptionItems.length} assumption(s), ${rawOutOfScopeItems.length} out-of-scope item(s) injected verbatim.`);
+    }
+
+    // If an AI template was selected, ensure the SOW follows its structure:
+    // fill in any sections/subsections the template has that the generated SOW
+    // is missing (template content verbatim, in template-relative position).
+    // Sections the SOW already has keep the AI's client-specific content.
+    if (selectedTemplate && templateTree) {
+      try {
+        // Safety net: with outline-first generation the AI uses the exact
+        // template titles, so any sections it still skipped are matched
+        // exactly and inserted in the right place/level (no semantic dupes).
+        const merged = mergeTemplateSections(content, templateTree);
+        if (merged.inserted.length > 0) {
+          content = merged.content;
+          console.log(`✅ Template safety-net: added ${merged.inserted.length} section(s) the AI omitted from "${templateName}": ${merged.inserted.join(', ')}`);
+        }
+      } catch (mergeErr) {
+        console.error('Template section merge failed (continuing without it):', mergeErr.message);
+      }
     }
 
     // Save SOW to database with user tracking

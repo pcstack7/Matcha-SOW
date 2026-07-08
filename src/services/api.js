@@ -88,6 +88,12 @@ export const templateApi = {
     if (!response.ok) throw new Error('Failed to fetch template content');
     return response.json();
   },
+
+  getOutline: async (id) => {
+    const response = await fetchWithAuth(`${API_BASE}/templates/${id}/outline`);
+    if (!response.ok) throw new Error('Failed to fetch template outline');
+    return response.json();
+  },
 };
 
 // SOW API
