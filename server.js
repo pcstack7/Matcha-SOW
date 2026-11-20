@@ -21,6 +21,7 @@ import { injectPlaceholders } from "./services/docx-injector.js";
 import { cleanVersionTables } from "./services/docx-version-cleaner.js";
 import { generateDocument } from "./services/docx-generator.js";
 import { applyAdHocReplacements } from "./services/docx-replacer.js";
+import { createMatchaApi, isMatchaUuid, MatchaApiError, normalizeMatchaBaseUrl } from "./services/matcha-api.js";
 import passport, { azureConfigured } from "./auth/passport-config.js";
 import { isAuthenticated, isAdmin, requireAdmin } from "./auth/middleware.js";
 import { initializeDefaultAdmin } from "./auth/init-admin.js";
@@ -131,16 +132,66 @@ if (!fs.existsSync(uploadDir)) {
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.MATCHA_API_KEY;
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 2010;
-const BASE_URL = process.env.BASE_URL || "https://matcha.harriscomputer.com/rest/api/v1";
-const MISSION_ID = process.env.MISSION_ID || 7618;
-const FOLDER_ID = process.env.FOLDER_ID || 10917; // Matcha folder for SOW uploads
+const WORKSPACE_ID = process.env.WORKSPACE_ID;
+const BASE_URL = normalizeMatchaBaseUrl(process.env.BASE_URL || "https://matchaos.harriscomputer.com/api");
+const MISSION_ID = process.env.MISSION_ID;
+const FOLDER_ID = process.env.FOLDER_ID;
 const EXTRACTION_MISSION_ID = process.env.EXTRACTION_MISSION_ID; // Dedicated mission for document extraction
-const EXTRACTION_FOLDER_ID = process.env.EXTRACTION_FOLDER_ID; // Folder inside extraction mission
 
 if (!API_KEY) {
   console.error("❌ MATCHA_API_KEY is missing in .env file.");
   process.exit(1);
+}
+
+const requiredMatchaIds = { WORKSPACE_ID, MISSION_ID, FOLDER_ID };
+for (const [name, value] of Object.entries(requiredMatchaIds)) {
+  if (!isMatchaUuid(value)) {
+    console.error(`❌ ${name} must be configured as a MatchaOS UUID.`);
+    process.exit(1);
+  }
+}
+if (EXTRACTION_MISSION_ID && !isMatchaUuid(EXTRACTION_MISSION_ID)) {
+  console.error("❌ EXTRACTION_MISSION_ID must be configured as a MatchaOS UUID.");
+  process.exit(1);
+}
+
+const matchaApi = createMatchaApi({ baseUrl: BASE_URL, apiKey: API_KEY, fetchImpl: fetch });
+
+function sameMatchaUuid(first, second) {
+  return typeof first === 'string' && typeof second === 'string' &&
+    first.toLowerCase() === second.toLowerCase();
+}
+
+function matchaRequestStatus(error) {
+  return error.status >= 400 && error.status < 500 ? error.status : 502;
+}
+
+function sendMatchaError(res, error, fallbackMessage) {
+  if (error instanceof MatchaApiError) {
+    console.error("MatchaOS request failed:", {
+      status: error.status,
+      requestId: error.requestId,
+      retryAfter: error.retryAfter,
+      ambiguous: error.ambiguous,
+    });
+    if (error.retryAfter) res.set('Retry-After', error.retryAfter);
+    return res.status(matchaRequestStatus(error)).json({
+      error: error.message,
+      ...(error.requestId ? { request_id: error.requestId } : {}),
+    });
+  }
+  console.error(fallbackMessage, error);
+  return res.status(500).json({ error: fallbackMessage });
+}
+
+function nextMatchaPollAt(retryAfter) {
+  const seconds = retryAfter === null || retryAfter === undefined || retryAfter === ''
+    ? Number.NaN
+    : Number(retryAfter);
+  const retryAt = Number.isFinite(seconds) && seconds >= 0
+    ? Date.now() + seconds * 1000
+    : Date.parse(retryAfter);
+  return new Date(Number.isFinite(retryAt) ? retryAt : Date.now() + 10_000).toISOString();
 }
 
 // Ensure upload directory for SOW Knowledge Bank files exists
@@ -791,6 +842,7 @@ app.get("/api/uploaded-sows/:id", isAuthenticated, (req, res) => {
 
 // Upload SOW to Knowledge Bank and Matcha
 app.post("/api/uploaded-sows", isAuthenticated, sowUpload.single('file'), async (req, res) => {
+  let uploadedSOWId = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
@@ -819,43 +871,14 @@ app.post("/api/uploaded-sows", isAuthenticated, sowUpload.single('file'), async 
       return res.status(400).json({ error: "Account is required" });
     }
 
-    // Upload file to Matcha
-    let matchaFileId = null;
-    try {
-      const FormData = (await import('form-data')).default;
-      const formData = new FormData();
-      formData.append('file', fs.createReadStream(req.file.path));
-
-      const matchaResponse = await fetch(`${BASE_URL}/file?folder_id=${FOLDER_ID}`, {
-        method: 'POST',
-        headers: {
-          'MATCHA-API-KEY': API_KEY,
-          'Accept': 'application/json',
-        },
-        body: formData,
-      });
-
-      if (matchaResponse.ok) {
-        const matchaData = await matchaResponse.json();
-        matchaFileId = matchaData.id || matchaData.file_id;
-        console.log(`✓ File uploaded to Matcha with ID: ${matchaFileId}`);
-      } else {
-        console.warn(`⚠ Failed to upload to Matcha: ${matchaResponse.statusText}`);
-      }
-    } catch (matchaErr) {
-      console.error("Error uploading to Matcha:", matchaErr);
-      // Continue even if Matcha upload fails
-    }
-
-    // Save to database
-    const id = uploadedSOWOps.create({
+    uploadedSOWId = uploadedSOWOps.create({
       account_id: parseInt(account_id),
       product_id: product_id ? parseInt(product_id) : null,
       engagement_type_id: engagement_type_id ? parseInt(engagement_type_id) : null,
       description: description || null,
       file_name: req.file.originalname,
       file_path: req.file.path,
-      matcha_file_id: matchaFileId,
+      matcha_sync_status: 'syncing',
       pricing: pricing ? parseFloat(pricing) : null,
       currency: currency || 'USD',
       pm_hours: pm_hours ? parseFloat(pm_hours) : null,
@@ -869,15 +892,74 @@ app.post("/api/uploaded-sows", isAuthenticated, sowUpload.single('file'), async 
       created_by: req.user.id,
     });
 
-    res.json({
-      message: "SOW uploaded successfully",
-      id,
-      matcha_file_id: matchaFileId,
+    try {
+      const FormData = (await import('form-data')).default;
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(req.file.path));
+      const matchaResponse = await matchaApi.uploadFile({ folderId: FOLDER_ID, formData });
+      const matchaFile = matchaResponse.data;
+
+      if (!sameMatchaUuid(matchaFile.folderId, FOLDER_ID) || !sameMatchaUuid(matchaFile.missionId, MISSION_ID)) {
+        uploadedSOWOps.updateMatchaSync(uploadedSOWId, {
+          fileId: matchaFile.id,
+          status: 'failed',
+          error: 'MatchaOS stored the file outside the configured mission folder. Contact an administrator.',
+        });
+      } else {
+        const processingStatus = matchaFile.processing?.status;
+        const status = processingStatus === 'done'
+          ? 'ready'
+          : processingStatus === 'error'
+            ? 'processing_error'
+            : processingStatus === 'running'
+              ? 'running'
+              : processingStatus === 'queued'
+                ? 'queued'
+                : 'unknown';
+        uploadedSOWOps.updateMatchaSync(uploadedSOWId, {
+          fileId: matchaFile.id,
+          status,
+          error: processingStatus === 'error'
+            ? (matchaFile.processing.error || 'MatchaOS could not process this file.')
+            : null,
+          nextPollAt: ['queued', 'running'].includes(status)
+            ? nextMatchaPollAt(matchaResponse.retryAfter)
+            : null,
+        });
+      }
+    } catch (matchaErr) {
+      const status = matchaErr instanceof MatchaApiError && !matchaErr.ambiguous ? 'failed' : 'unknown';
+      const error = status === 'unknown'
+        ? 'MatchaOS upload result could not be confirmed. Check the MatchaOS folder before retrying.'
+        : matchaErr.message;
+      try {
+        uploadedSOWOps.updateMatchaSync(uploadedSOWId, { status, error });
+      } catch (dbErr) {
+        console.error('Could not save MatchaOS upload status:', dbErr.message);
+      }
+      if (matchaErr instanceof MatchaApiError) {
+        console.error("MatchaOS file upload failed:", {
+          status: matchaErr.status,
+          requestId: matchaErr.requestId,
+          ambiguous: matchaErr.ambiguous,
+        });
+      } else {
+        console.error("MatchaOS file upload failed:", matchaErr.message);
+      }
+    }
+
+    const savedSOW = uploadedSOWOps.getById(uploadedSOWId);
+    res.status(201).json({
+      message: "SOW saved to the local knowledge bank",
+      id: uploadedSOWId,
+      matcha_file_id: savedSOW.matcha_file_id,
+      matcha_sync_status: savedSOW.matcha_sync_status,
+      matcha_sync_error: savedSOW.matcha_sync_error,
     });
   } catch (err) {
     console.error("Error uploading SOW:", err);
     // Clean up file if it exists
-    if (req.file && fs.existsSync(req.file.path)) {
+    if (uploadedSOWId === null && req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     res.status(500).json({ error: "Failed to upload SOW" });
@@ -1470,28 +1552,18 @@ IMPORTANT FORMATTING RULES:
 
 Format the output as a well-structured document with clear section headers and subheaders.`;
 
-    // Call Matcha API
-    const response = await fetch(`${BASE_URL}/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "MATCHA-API-KEY": API_KEY,
-      },
-      body: JSON.stringify({
-        mission_id: MISSION_ID,
-        input: prompt,
-      }),
+    const completion = await matchaApi.completeMission({
+      missionId: MISSION_ID,
+      input: prompt,
+      options: { includeSources: true },
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ API error:", errorText);
-      return res.status(response.status).json({ error: "Matcha API failed" });
+    if (completion.warnings) {
+      throw new MatchaApiError('MatchaOS could not retrieve Mission documents for this SOW.', {
+        status: 502,
+        requestId: completion.requestId,
+      });
     }
-
-    const data = await response.json();
-    const contentBlock = data?.output?.[0]?.content?.find(c => c.type === 'output_text') || data?.output?.[0]?.content?.[0];
-    const rawContent = contentBlock?.text || "No response generated.";
+    const rawContent = completion.outputText;
 
     // Post-process: guarantee Assumptions and Out of Scope sections contain
     // the exact curated items verbatim, regardless of what Matcha produced.
@@ -1543,6 +1615,9 @@ Format the output as a well-structured document with clear section headers and s
     const sow = sowOps.getById(id);
     res.status(201).json(sow);
   } catch (err) {
+    if (err instanceof MatchaApiError) {
+      return sendMatchaError(res, err, "MatchaOS failed to generate the SOW.");
+    }
     console.error("Error generating SOW:", err);
     res.status(500).json({ error: "Failed to generate SOW" });
   }
@@ -1896,32 +1971,24 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
-    const response = await fetch(`${BASE_URL}/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "MATCHA-API-KEY": API_KEY,
-      },
-      body: JSON.stringify({
-        mission_id: MISSION_ID,
-        input,
-      }),
+    const completion = await matchaApi.completeMission({
+      missionId: MISSION_ID,
+      input,
+      options: { includeSources: true },
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ API error:", errorText);
-      return res.status(response.status).json({ error: "Matcha API failed" });
+    if (completion.warnings) {
+      throw new MatchaApiError('MatchaOS could not retrieve Mission documents for this answer.', {
+        status: 502,
+        requestId: completion.requestId,
+      });
     }
 
-    const data = await response.json();
-    const outputBlock = data?.output?.[0]?.content?.find(c => c.type === 'output_text') || data?.output?.[0]?.content?.[0];
-    const outputText = outputBlock?.text || "No response text available.";
-
-
-    res.json({ status: data.status, outputText });
+    res.json({ status: 'success', outputText: completion.outputText });
   } catch (err) {
-    console.error("⚠️ Error calling Matcha API:", err);
+    if (err instanceof MatchaApiError) {
+      return sendMatchaError(res, err, "MatchaOS failed to answer the question.");
+    }
+    console.error("⚠️ Error calling MatchaOS:", err.message);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -2224,8 +2291,8 @@ app.post("/api/sows/extract-from-documents", isAuthenticated, extractionUpload.a
 
     // ── Step 2: Single Matcha completions call with text as context ───────────
     // Using mission_id ensures the extraction persona is applied.
-    // Passing extracted text as `context` with llmChatOnly:true means the LLM
-    // reads exactly what we provide — no vector search, no indexing delay.
+    // The new Mission API treats context as additional instructions; it does not
+    // disable retrieval, so the extraction Mission must be configured accordingly.
     const combinedContext = 'DOCUMENT CONTENT:\n\n' + extractedTexts.join('\n\n');
 
     const extractionPrompt = `Analyze the document content provided in the context and extract the following information for a software implementation Statement of Work:
@@ -2241,60 +2308,51 @@ Return ONLY a JSON object in this exact format:
 
 Do not include any explanation, markdown fences, or text outside the JSON object.`;
 
-    const completionBody = {
-      mission_id: parseInt(EXTRACTION_MISSION_ID),
+    const completion = await matchaApi.completeMission({
+      missionId: EXTRACTION_MISSION_ID,
       input: extractionPrompt,
       context: combinedContext,
-      options: { llmChatOnly: true },
-    };
-
-    const completionResponse = await fetch(`${BASE_URL}/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'MATCHA-API-KEY': API_KEY,
-      },
-      body: JSON.stringify(completionBody),
+      options: { useWebSearch: false },
     });
 
-    if (!completionResponse.ok) {
-      const errText = await completionResponse.text();
-      console.error('Matcha extraction completions error:', errText);
-      return res.status(completionResponse.status).json({ error: "Matcha extraction call failed. Please try again." });
-    }
-
     // ── Step 3: Parse the response ────────────────────────────────────────────
-    const completionData = await completionResponse.json();
-    const textBlock = completionData?.output?.[0]?.content?.find(c => c.type === 'output_text')
-                   || completionData?.output?.[0]?.content?.[0];
-    const rawText = textBlock?.text || '';
-
-    let projectNotes = '';
-    let deliverables = '';
+    const rawText = completion.outputText;
+    let parsed;
 
     try {
       // Strip markdown code fences if Matcha wrapped the JSON
-      const cleaned = rawText.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      projectNotes = parsed.project_notes || '';
-      deliverables = parsed.deliverables || '';
+      const cleaned = rawText
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/, '')
+        .trim();
+      parsed = JSON.parse(cleaned);
     } catch (parseErr) {
-      // If not valid JSON, surface the raw text so the user still gets something
-      console.warn('Could not parse extraction response as JSON — returning raw text');
-      projectNotes = rawText;
-      deliverables = '';
+      console.error('MatchaOS extraction returned invalid JSON:', parseErr.message);
+      return res.status(502).json({ error: "MatchaOS returned an invalid extraction response." });
+    }
+
+    if (
+      typeof parsed?.project_notes !== 'string' ||
+      typeof parsed?.deliverables !== 'string' ||
+      (!parsed.project_notes.trim() && !parsed.deliverables.trim())
+    ) {
+      return res.status(502).json({ error: "MatchaOS returned no usable project notes or deliverables." });
     }
 
     res.json({
-      project_notes: projectNotes,
-      deliverables: deliverables,
+      project_notes: parsed.project_notes,
+      deliverables: parsed.deliverables,
       files_processed: processedFileNames,
     });
 
   } catch (err) {
     // Ensure local files are cleaned up on unexpected error
     localFilePaths.forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-    console.error("Error extracting from documents:", err);
+    if (err instanceof MatchaApiError) {
+      return sendMatchaError(res, err, "MatchaOS extraction failed.");
+    }
+    console.error("Error extracting from documents:", err.message);
     res.status(500).json({ error: "Failed to extract content from documents" });
   }
 });
@@ -2755,9 +2813,93 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+let pollingMatchaFiles = false;
+async function pollPendingMatchaFiles() {
+  if (pollingMatchaFiles) return;
+  pollingMatchaFiles = true;
+  try {
+    const pendingFiles = uploadedSOWOps.getPendingMatchaSync();
+    await Promise.all(pendingFiles.map(async uploadedSOW => {
+      try {
+        const response = await matchaApi.getFile(uploadedSOW.matcha_file_id);
+        const file = response.data;
+        if (!sameMatchaUuid(file.folderId, FOLDER_ID) || !sameMatchaUuid(file.missionId, MISSION_ID)) {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: 'failed',
+            error: 'The MatchaOS file is not in the configured mission folder.',
+          });
+          return;
+        }
+
+        const processingStatus = file.processing?.status;
+        if (processingStatus === 'done') {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: 'ready',
+            error: null,
+            nextPollAt: null,
+          });
+        } else if (processingStatus === 'error') {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: 'processing_error',
+            error: file.processing.error || 'MatchaOS could not process this file.',
+            nextPollAt: null,
+          });
+        } else if (processingStatus === 'queued' || processingStatus === 'running') {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: processingStatus,
+            error: null,
+            nextPollAt: nextMatchaPollAt(response.retryAfter),
+          });
+        } else {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: 'unknown',
+            error: 'MatchaOS did not report a file processing status.',
+            nextPollAt: null,
+          });
+        }
+      } catch (error) {
+        if (error instanceof MatchaApiError && [401, 403, 404].includes(error.status)) {
+          uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+            status: 'failed',
+            error: `MatchaOS could not access this file (HTTP ${error.status}).`,
+            nextPollAt: null,
+          });
+          console.error('MatchaOS file status check failed:', {
+            status: error.status,
+            requestId: error.requestId,
+          });
+          return;
+        }
+
+        const retryAfter = error instanceof MatchaApiError ? error.retryAfter : null;
+        uploadedSOWOps.updateMatchaSync(uploadedSOW.id, {
+          status: uploadedSOW.matcha_sync_status,
+          error: 'Could not refresh the MatchaOS processing status; another check is scheduled.',
+          nextPollAt: nextMatchaPollAt(retryAfter),
+        });
+        if (error instanceof MatchaApiError) {
+          console.error('MatchaOS file status check will retry:', {
+            status: error.status,
+            requestId: error.requestId,
+          });
+        } else {
+          console.error('MatchaOS file status check will retry:', error.message);
+        }
+      }
+    }));
+  } finally {
+    pollingMatchaFiles = false;
+  }
+}
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Matcha SOW Application running at http://localhost:${PORT}`);
+  void pollPendingMatchaFiles().catch(err => console.error('MatchaOS file sync polling failed:', err.message));
+  const matchaPollingTimer = setInterval(() => {
+    void pollPendingMatchaFiles().catch(err => console.error('MatchaOS file sync polling failed:', err.message));
+  }, 10_000);
+  matchaPollingTimer.unref();
   // Surface which PDF engine is active so a mismatched PDF (pdfkit fallback)
   // vs the template-shell DOCX is easy to diagnose from the logs.
   if (isLibreOfficeAvailable()) {

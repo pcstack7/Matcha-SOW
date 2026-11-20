@@ -77,11 +77,15 @@ npm install
 3. Create a `.env` file in the root directory:
 ```env
 MATCHA_API_KEY=your_api_key_here
-WORKSPACE_ID=2010
-MISSION_ID=7618
-BASE_URL=https://matcha.harriscomputer.com/rest/api/v1
+BASE_URL=https://matchaos.harriscomputer.com/api
+WORKSPACE_ID=your_workspace_uuid
+MISSION_ID=your_mission_uuid
+FOLDER_ID=your_knowledge_bank_folder_uuid
+EXTRACTION_MISSION_ID=your_extraction_mission_uuid
 PORT=3000
 ```
+
+Use the UUIDs from MatchaOS, not legacy numeric Matcha IDs. `EXTRACTION_MISSION_ID` is optional. Uploaded knowledge-bank SOWs are stored locally even if MatchaOS sync fails; the Knowledge Bank shows whether the remote file is uploading, processing, ready, or failed.
 
 4. Build the frontend:
 ```bash
@@ -272,8 +276,9 @@ CREATE TABLE sows (
 
 ### Matcha API errors
 - Verify your `MATCHA_API_KEY` is correct in `.env`
+- Ensure `BASE_URL` is `https://matchaos.harriscomputer.com/api`
 - Check your internet connection
-- Ensure `WORKSPACE_ID` and `MISSION_ID` are correct
+- Ensure `WORKSPACE_ID`, `MISSION_ID`, and `FOLDER_ID` are valid MatchaOS UUIDs and the API key can access them
 
 ### Build errors
 - Delete `node_modules` and run `npm install` again
