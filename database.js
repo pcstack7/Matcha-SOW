@@ -110,6 +110,31 @@ function migrateDatabase() {
     console.log('SOWs table migration skipped');
   }
 
+  const uploadedSOWColumns = db.prepare("PRAGMA table_info(uploaded_sows)").all().map(column => column.name);
+  const addedMatchaSyncStatus = !uploadedSOWColumns.includes('matcha_sync_status');
+  if (addedMatchaSyncStatus) {
+    db.exec("ALTER TABLE uploaded_sows ADD COLUMN matcha_sync_status TEXT NOT NULL DEFAULT 'not_synced'");
+  }
+  if (!uploadedSOWColumns.includes('matcha_sync_error')) {
+    db.exec('ALTER TABLE uploaded_sows ADD COLUMN matcha_sync_error TEXT');
+  }
+  if (!uploadedSOWColumns.includes('matcha_sync_next_poll_at')) {
+    db.exec('ALTER TABLE uploaded_sows ADD COLUMN matcha_sync_next_poll_at TEXT');
+  }
+  if (addedMatchaSyncStatus) {
+    db.exec(`
+      UPDATE uploaded_sows
+      SET matcha_sync_status = CASE WHEN matcha_file_id IS NULL THEN 'not_synced' ELSE 'unknown' END
+    `);
+  }
+  db.exec(`
+    UPDATE uploaded_sows
+    SET matcha_sync_status = 'unknown',
+        matcha_sync_error = 'The server restarted before the MatchaOS upload result could be confirmed.',
+        matcha_sync_next_poll_at = NULL
+    WHERE matcha_sync_status = 'syncing' AND matcha_file_id IS NULL
+  `);
+
   // Add is_default flag to placeholder_definitions (distinguishes the seeded
   // built-in placeholders from user-created ones, so cleanup never removes a
   // standard default).
@@ -274,6 +299,9 @@ function initializeDatabase() {
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
       matcha_file_id TEXT,
+      matcha_sync_status TEXT NOT NULL DEFAULT 'not_synced',
+      matcha_sync_error TEXT,
+      matcha_sync_next_poll_at TEXT,
       pricing REAL,
       currency TEXT DEFAULT 'USD',
       pm_hours REAL,
@@ -1028,14 +1056,25 @@ export const uploadedSOWOps = {
     return stmt.get(id);
   },
 
+  getPendingMatchaSync: (now = new Date().toISOString(), limit = 10) => db.prepare(`
+    SELECT id, matcha_file_id, matcha_sync_status
+    FROM uploaded_sows
+    WHERE matcha_sync_status IN ('queued', 'running')
+      AND matcha_file_id IS NOT NULL
+      AND (matcha_sync_next_poll_at IS NULL OR matcha_sync_next_poll_at <= ?)
+    ORDER BY matcha_sync_next_poll_at
+    LIMIT ?
+  `).all(now, limit),
+
   create: (uploadedSOW) => {
     const stmt = db.prepare(`
       INSERT INTO uploaded_sows (
         account_id, product_id, engagement_type_id, description, file_name, file_path,
-        matcha_file_id, pricing, currency, pm_hours, ic_hours, sa_hours, se_hours,
-        trainer_hours, integration_hours, apac_testing_hours, apac_rd_hours, created_by
+        matcha_file_id, matcha_sync_status, matcha_sync_error, matcha_sync_next_poll_at,
+        pricing, currency, pm_hours, ic_hours, sa_hours, se_hours, trainer_hours,
+        integration_hours, apac_testing_hours, apac_rd_hours, created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       uploadedSOW.account_id,
@@ -1045,6 +1084,9 @@ export const uploadedSOWOps = {
       uploadedSOW.file_name,
       uploadedSOW.file_path,
       uploadedSOW.matcha_file_id || null,
+      uploadedSOW.matcha_sync_status || 'not_synced',
+      uploadedSOW.matcha_sync_error || null,
+      uploadedSOW.matcha_sync_next_poll_at || null,
       uploadedSOW.pricing || null,
       uploadedSOW.currency || 'USD',
       uploadedSOW.pm_hours || null,
@@ -1058,6 +1100,20 @@ export const uploadedSOWOps = {
       uploadedSOW.created_by
     );
     return result.lastInsertRowid;
+  },
+
+  updateMatchaSync: (id, syncState) => {
+    const { fileId, status, error = null, nextPollAt = null } = syncState;
+    const hasFileId = Object.prototype.hasOwnProperty.call(syncState, 'fileId');
+    db.prepare(`
+      UPDATE uploaded_sows
+      SET matcha_file_id = CASE WHEN ? THEN ? ELSE matcha_file_id END,
+          matcha_sync_status = ?,
+          matcha_sync_error = ?,
+          matcha_sync_next_poll_at = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(hasFileId ? 1 : 0, fileId || null, status, error, nextPollAt, id);
   },
 
   update: (id, uploadedSOW) => {

@@ -8,6 +8,7 @@ function UploadedSOWManagement({ userRole }) {
   const [engagementTypes, setEngagementTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingSOW, setEditingSOW] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -35,6 +36,26 @@ function UploadedSOWManagement({ userRole }) {
   useEffect(() => {
     loadData();
   }, [filter]);
+
+  useEffect(() => {
+    if (!uploadedSOWs.some(sow => ['syncing', 'queued', 'running'].includes(sow.matcha_sync_status))) {
+      return undefined;
+    }
+
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/uploaded-sows?filter=${filter}`, { credentials: 'include' });
+        if (!response.ok) {
+          throw new Error('Failed to refresh MatchaOS sync status');
+        }
+        setUploadedSOWs(await response.json());
+      } catch (err) {
+        setError(err.message);
+      }
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [filter, uploadedSOWs]);
 
   const loadData = async () => {
     try {
@@ -148,6 +169,7 @@ function UploadedSOWManagement({ userRole }) {
     try {
       setUploading(true);
 
+      let uploadResult = null;
       if (editingSOW) {
         // Update existing SOW (metadata only)
         const response = await fetch(`/api/uploaded-sows/${editingSOW.id}`, {
@@ -190,9 +212,22 @@ function UploadedSOWManagement({ userRole }) {
           const data = await response.json();
           throw new Error(data.error || 'Failed to upload SOW');
         }
+        uploadResult = await response.json();
       }
 
-      loadData();
+      await loadData();
+      if (uploadResult?.matcha_sync_status === 'ready') {
+        setNotice({ type: 'success', text: 'SOW uploaded and indexed in MatchaOS.' });
+      } else if (uploadResult) {
+        const status = uploadResult.matcha_sync_status;
+        const detail = uploadResult.matcha_sync_error ? ` ${uploadResult.matcha_sync_error}` : '';
+        const message = status === 'queued' || status === 'running'
+          ? 'SOW saved locally. MatchaOS is still processing the file; its status will update here.'
+          : status === 'failed' || status === 'processing_error' || status === 'unknown'
+            ? `SOW saved locally, but MatchaOS sync is ${status}.${detail}`
+            : 'SOW saved locally. MatchaOS indexing status is not yet available.';
+        setNotice({ type: status === 'failed' || status === 'processing_error' || status === 'unknown' ? 'info' : 'success', text: message });
+      }
       handleCloseModal();
     } catch (err) {
       setError(err.message);
@@ -320,6 +355,13 @@ function UploadedSOWManagement({ userRole }) {
         </div>
       )}
 
+      {notice && (
+        <div className={`alert alert-${notice.type}`}>
+          {notice.text}
+          <button onClick={() => setNotice(null)} className="alert-close">&times;</button>
+        </div>
+      )}
+
       {uploadedSOWs.length === 0 ? (
         <div className="empty-state">
           <p>No SOWs uploaded yet. Upload your first finalized SOW to start building your knowledge bank.</p>
@@ -337,6 +379,7 @@ function UploadedSOWManagement({ userRole }) {
                 <th>Total Hours</th>
                 <th>Uploaded By</th>
                 <th>Date</th>
+                <th>MatchaOS Sync</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -352,6 +395,36 @@ function UploadedSOWManagement({ userRole }) {
                   <td>{calculateTotalHours(sow).toFixed(1)}h</td>
                   <td>{sow.created_by_display_name || sow.created_by_username}</td>
                   <td>{formatDate(sow.created_at)}</td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        sow.matcha_sync_status === 'ready'
+                          ? 'badge-success'
+                          : ['failed', 'processing_error'].includes(sow.matcha_sync_status)
+                            ? 'badge-danger'
+                            : ['queued', 'running', 'syncing'].includes(sow.matcha_sync_status)
+                              ? 'badge-info'
+                              : 'badge-secondary'
+                      }`}
+                      title={sow.matcha_sync_error || ''}
+                    >
+                      {{
+                        not_synced: 'Not synced',
+                        syncing: 'Uploading',
+                        unknown: 'Unknown',
+                        queued: 'Queued',
+                        running: 'Processing',
+                        ready: 'Ready',
+                        failed: 'Upload failed',
+                        processing_error: 'Indexing failed',
+                      }[sow.matcha_sync_status] || 'Unknown'}
+                    </span>
+                    {sow.matcha_sync_error && (
+                      <div style={{ fontSize: '0.75rem', maxWidth: '220px', marginTop: '0.25rem' }}>
+                        {sow.matcha_sync_error}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <span style={{
                       color: sow.is_active ? '#28a745' : '#6c757d',

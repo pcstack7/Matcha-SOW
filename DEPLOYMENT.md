@@ -157,12 +157,16 @@ nano .env
 ```env
 # Paste the following (replace with your actual values)
 MATCHA_API_KEY=your_actual_api_key_here
-WORKSPACE_ID=2010
-MISSION_ID=7618
-BASE_URL=https://matcha.harriscomputer.com/rest/api/v1
+BASE_URL=https://matchaos.harriscomputer.com/api
+WORKSPACE_ID=your_workspace_uuid
+MISSION_ID=your_mission_uuid
+FOLDER_ID=your_knowledge_bank_folder_uuid
+EXTRACTION_MISSION_ID=your_extraction_mission_uuid
 PORT=3000
 NODE_ENV=production
 ```
+
+Use the MatchaOS UUIDs, not legacy numeric Matcha IDs. `EXTRACTION_MISSION_ID` is optional. The application stores knowledge-bank uploads locally and reports remote upload/indexing state in the UI.
 
 Save and exit (Ctrl+X, then Y, then Enter).
 
